@@ -10,8 +10,13 @@ interface SensorGridProps {
 // Constants for grid dimensions and visualization
 const GRID_WIDTH = 12;
 const GRID_HEIGHT = 15;
-const SENSOR_SIZE = 0.8; // Size of each sensor pillar
-const MAX_PILLAR_HEIGHT = 3.0; // Increased maximum height for more dramatic effect
+
+// Real-world measurements
+const SENSOR_INCHES = 4; // Each sensor is 4" x 4"
+const INCH_TO_UNIT = 0.04; // Conversion factor from inches to 3D units
+const SENSOR_SIZE = SENSOR_INCHES * INCH_TO_UNIT; // Size of each sensor pillar (properly scaled)
+
+const MAX_PILLAR_HEIGHT = 2.0; // Increased maximum height for more dramatic effect
 const MIN_PILLAR_HEIGHT = 0.01; // Minimum height (nearly invisible)
 const HEIGHT_GROW_SPEED = 3.0; // How quickly pillars grow when activated
 const HEIGHT_SHRINK_SPEED = 2.5; // How quickly pillars shrink when deactivated
@@ -195,9 +200,9 @@ export default function SensorGrid({ data }: SensorGridProps) {
       for (let col = 0; col < GRID_WIDTH; col++) {
         meshes.push({
           position: [
-            col - GRID_WIDTH/2 + 0.5, // Center the grid on X
+            (col - GRID_WIDTH/2 + 0.5) * SENSOR_SIZE, // Center the grid on X, properly scaled
             0, // Y will be adjusted in render
-            row - GRID_HEIGHT/2 + 0.5 // Center the grid on Z
+            (row - GRID_HEIGHT/2 + 0.5) * SENSOR_SIZE // Center the grid on Z, properly scaled
           ],
           key: `sensor-${row}-${col}`,
           indices: [row, col]
@@ -212,7 +217,7 @@ export default function SensorGrid({ data }: SensorGridProps) {
     <group>
       {/* Base grid plane */}
       <Plane 
-        args={[GRID_WIDTH, GRID_HEIGHT]} 
+        args={[GRID_WIDTH * SENSOR_SIZE, GRID_HEIGHT * SENSOR_SIZE]} 
         rotation={[-Math.PI / 2, 0, 0]} 
         position={[0, 0, 0]}
         receiveShadow
@@ -228,7 +233,7 @@ export default function SensorGrid({ data }: SensorGridProps) {
       
       {/* Grid lines */}
       <primitive object={new THREE.GridHelper(
-        Math.max(GRID_WIDTH, GRID_HEIGHT), 
+        Math.max(GRID_WIDTH, GRID_HEIGHT) * SENSOR_SIZE, 
         Math.max(GRID_WIDTH, GRID_HEIGHT), 
         '#2d3748', '#2d3748'
       )} position={[0, 0.01, 0]} />

@@ -628,7 +628,7 @@ def has_significant_movement(frame_array, prev_frame=None, threshold=0.05):
     # Temporarily disabled - always return True to allow all frames
     return True
 
-def process_frame(frame_data):
+def process_frame(frame_data, force_fall=False):
     """Process a single frame of sensor data and check for falls."""
     global frame_buffer, high_prob_frames, last_fall_time, fall_probability, fall_in_progress, prev_frame, alert_history
     
@@ -640,7 +640,7 @@ def process_frame(frame_data):
         logger.debug(f"Frame data type: {frame_data.dtype}")
     
         # Check for no activity (all zeros)
-        if np.sum(frame_data) == 0:
+        if np.sum(frame_data) == 0 and not force_fall:
             # Clear buffers if no activity
             frame_buffer.clear()
             high_prob_frames.clear()
@@ -677,6 +677,29 @@ def process_frame(frame_data):
         logger.debug(f"Wandering metrics: {wandering_metrics}")
         logger.debug(f"Gait metrics: {gait_metrics}")
 
+        # Force a fall if requested (for testing)
+        if force_fall:
+            logger.info("Forcing fall detection for testing")
+            last_fall_time = current_time
+            fall_in_progress = True
+            fall_probability = 0.95  # High confidence for test
+            
+            # Update grid_updates queue with fall event
+            update = {
+                'grid': frame_data.tolist(),
+                'fall_detected': True,
+                'confidence': float(fall_probability) * 100,
+                'decibelLevel': float(decibel_level),
+                'balanceMetrics': balance_metrics,
+                'wanderingMetrics': wandering_metrics,
+                'gaitMetrics': gait_metrics,
+                'timestamp': datetime.now().isoformat()
+            }
+            grid_updates.put(update)
+            
+            logger.info("🚨 Test fall detected! Sending alert to frontend")
+            return True, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+        
         # If we're in cooldown and a fall was detected, maintain the alert
         if fall_in_progress and current_time - last_fall_time < COOLDOWN_PERIOD:
             logger.debug(f"Maintaining fall alert. Cooldown remaining: {COOLDOWN_PERIOD - (current_time - last_fall_time):.1f}s")
@@ -1129,6 +1152,355 @@ def test_sms():
             "status": "error",
             "message": "Failed to send test SMS",
             "error": error_details
+        }), 500
+
+@app.route('/api/test/simulate-fall', methods=['POST'])
+def simulate_fall():
+    """Test endpoint to simulate a fall detection event."""
+    try:
+        data = request.json
+        fall_type = data.get('fallType', 'forward')
+        logger.info(f"Simulating a {fall_type} fall for testing")
+        
+        # Create a synthetic fall frame with a realistic pattern
+        simulated_frame = np.zeros((GRID_HEIGHT, GRID_WIDTH), dtype=np.float32)
+        
+        # Add more realistic scattered pressure points based on fall type
+        if fall_type == 'forward':
+            # Forward fall - scattered pressure points in front area
+            # Head/face impact
+            for i in range(9, 12):
+                for j in range(5, 7):
+                    if random.random() > 0.4:  # Add randomness
+                        intensity = 0.8 + (random.random() * 0.2)
+                        simulated_frame[i, j] = intensity
+            
+            # Hands/arms impact (typically spread out)
+            for i in range(8, 11):
+                for j in range(3, 9):
+                    if random.random() > 0.75:  # Sparse pattern
+                        intensity = 0.5 + (random.random() * 0.5)
+                        simulated_frame[i, j] = intensity
+            
+            # Knees impact
+            for i in range(6, 8):
+                for j in range(4, 8):
+                    if random.random() > 0.7:
+                        intensity = 0.7 + (random.random() * 0.3)
+                        simulated_frame[i, j] = intensity
+                        
+        elif fall_type == 'backward':
+            # Backward fall - scattered pressure in back/head area
+            # Back of head impact
+            for i in range(2, 4):
+                for j in range(5, 7):
+                    if random.random() > 0.4:
+                        intensity = 0.8 + (random.random() * 0.2)
+                        simulated_frame[i, j] = intensity
+            
+            # Back/shoulder blades impact
+            for i in range(3, 6):
+                for j in range(3, 9):
+                    if random.random() > 0.7:
+                        intensity = 0.7 + (random.random() * 0.3)
+                        simulated_frame[i, j] = intensity
+            
+            # Possible arm impacts (outstretched to break fall)
+            if random.random() > 0.5:  # Sometimes arms break the fall
+                for i in range(4, 7):
+                    for j in [2, 3, 8, 9]:  # Sides
+                        if random.random() > 0.7:
+                            simulated_frame[i, j] = 0.6 + (random.random() * 0.2)
+                            
+        elif fall_type == 'left':
+            # Left side fall - pressure along left side
+            
+            # Head/shoulder impact
+            for i in range(6, 9):
+                for j in range(2, 4):
+                    if random.random() > 0.5:
+                        simulated_frame[i, j] = 0.7 + (random.random() * 0.3)
+            
+            # Left arm/hip impact (typically a line of pressure points)
+            for i in range(5, 11):
+                for j in range(2, 5):
+                    if random.random() > 0.8:  # Very sparse
+                        simulated_frame[i, j] = 0.5 + (random.random() * 0.5)
+            
+            # More concentrated pressure at hip
+            for i in range(8, 10):
+                for j in range(3, 5):
+                    if random.random() > 0.3:
+                        simulated_frame[i, j] = 0.8 + (random.random() * 0.2)
+                        
+        elif fall_type == 'right':
+            # Right side fall - pressure along right side
+            
+            # Head/shoulder impact
+            for i in range(6, 9):
+                for j in range(8, 10):
+                    if random.random() > 0.5:
+                        simulated_frame[i, j] = 0.7 + (random.random() * 0.3)
+            
+            # Right arm/hip impact (typically a line of pressure points)
+            for i in range(5, 11):
+                for j in range(7, 10):
+                    if random.random() > 0.8:  # Very sparse
+                        simulated_frame[i, j] = 0.5 + (random.random() * 0.5)
+            
+            # More concentrated pressure at hip
+            for i in range(8, 10):
+                for j in range(7, 9):
+                    if random.random() > 0.3:
+                        simulated_frame[i, j] = 0.8 + (random.random() * 0.2)
+        
+        # Add a few random noise points (sometimes seen in real data)
+        for _ in range(3):
+            i = random.randint(0, GRID_HEIGHT-1)
+            j = random.randint(0, GRID_WIDTH-1)
+            if simulated_frame[i, j] == 0:  # Don't overwrite existing activation
+                simulated_frame[i, j] = 0.3 + (random.random() * 0.2)  # Low intensity noise
+        
+        # Process the simulated frame with high fall probability
+        process_frame(simulated_frame, force_fall=True)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Simulated {fall_type} fall created"
+        })
+            
+    except Exception as e:
+        error_details = str(e)
+        logger.error(f"Failed to simulate fall: {error_details}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to simulate fall",
+            "error": error_details
+        }), 500
+
+@app.route('/api/training-sequences')
+def get_training_sequences():
+    """Get a list of available training sequence files."""
+    try:
+        import os
+        import re
+        from pathlib import Path
+        
+        # Get the root directory (go up one level from web_working)
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(root_dir, 'data')
+        
+        # Get all training files
+        files = []
+        for file in os.listdir(data_dir):
+            if file.startswith('recorded_sequences_') and file.endswith('.json'):
+                files.append(file)
+        
+        # Sort files by date
+        files.sort(reverse=True)
+        
+        return jsonify({
+            'files': files,
+            'count': len(files)
+        })
+    except Exception as e:
+        logger.error(f"Error getting training sequences: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/training-sequence/<filename>')
+def get_training_sequence(filename):
+    """Load a specific training sequence file."""
+    try:
+        import os
+        import json
+        import re
+        
+        # Validate filename to prevent directory traversal
+        if not re.match(r'^recorded_sequences_[\d_]+\.json$', filename):
+            return jsonify({
+                'error': 'Invalid filename format'
+            }), 400
+        
+        # Get the root directory (go up one level from web_working)
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_path = os.path.join(root_dir, 'data', filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({
+                'error': 'File not found'
+            }), 404
+            
+        # Load the file
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+            
+        # Convert data into the format expected by the fall visualization
+        sequences = []
+        
+        if "sequences" in data:
+            for idx, seq in enumerate(data["sequences"]):
+                # Build a fall event object
+                fall_event = {
+                    "id": f"{filename}-{idx}",
+                    "timestamp": seq.get("timestamp", ""),
+                    "frames": seq.get("frames", []),
+                    "fallDetected": seq.get("label", "") == "fall",
+                    "fallProbability": 0.9 if seq.get("label", "") == "fall" else 0.1,
+                    "analysis": {
+                        "type": seq.get("label", "unknown"),
+                        "bodyImpactSequence": [],
+                        "trajectory": {
+                            "direction": "forward",  # Default direction
+                            "startPoint": [6, 0, 7],  # Mid-grid start point (12×15 grid)
+                            "endPoint": [6, 0, 11],   # Forward movement by default
+                            "impactPoints": [], 
+                            "velocity": 1.0
+                        },
+                        "balanceMetrics": {
+                            "preFailStabilityScore": 0.7,
+                            "asymmetryIndex": 0.3
+                        }
+                    }
+                }
+                
+                # Calculate impact points & trajectory from pressure data
+                if fall_event["fallDetected"] and len(seq.get("frames", [])) > 0:
+                    # Find frame with maximum pressure (impact frame)
+                    max_pressure = 0
+                    max_pressure_frame = None
+                    max_frame_idx = 0
+                    
+                    for frame_idx, frame_data in enumerate(seq.get("frames", [])):
+                        if "frame" in frame_data and isinstance(frame_data["frame"], list):
+                            total_pressure = 0
+                            frame = frame_data["frame"]
+                            
+                            # Calculate total pressure
+                            for row in frame:
+                                for cell in row:
+                                    total_pressure += cell
+                                    
+                            if total_pressure > max_pressure:
+                                max_pressure = total_pressure
+                                max_pressure_frame = frame
+                                max_frame_idx = frame_idx
+                    
+                    # If we found an impact frame, set impact points
+                    if max_pressure_frame:
+                        # Find areas with highest pressure
+                        impact_points = []
+                        weighted_x = 0
+                        weighted_z = 0
+                        weight_sum = 0
+                        
+                        # Height of each grid
+                        height = len(max_pressure_frame)
+                        width = len(max_pressure_frame[0]) if height > 0 else 0
+                        
+                        for row_idx, row in enumerate(max_pressure_frame):
+                            for col_idx, pressure in enumerate(row):
+                                if pressure > 0.5:  # High pressure threshold
+                                    # Convert to 3D coordinates (X, Y, Z)
+                                    x = col_idx
+                                    z = row_idx
+                                    y = 0  # Ground level
+                                    
+                                    weighted_x += x * pressure
+                                    weighted_z += z * pressure
+                                    weight_sum += pressure
+                                    
+                                    # Add as impact point
+                                    impact_points.append([x, y, z])
+                        
+                        # Calculate center of pressure
+                        if weight_sum > 0:
+                            center_x = weighted_x / weight_sum
+                            center_z = weighted_z / weight_sum
+                            
+                            # Set start point at the beginning of the grid
+                            start_x = width / 2  # Middle of grid
+                            start_z = 2          # Near edge
+                            
+                            # Set end point at center of pressure
+                            end_x = center_x
+                            end_z = center_z
+                            
+                            # Determine fall direction
+                            dx = end_x - start_x
+                            dz = end_z - start_z
+                            
+                            direction = "forward"  # Default
+                            
+                            if abs(dx) > abs(dz):
+                                # More horizontal movement
+                                direction = "right" if dx > 0 else "left"
+                            else:
+                                # More vertical movement
+                                direction = "backward" if dz > 0 else "forward"
+                            
+                            # Update trajectory
+                            fall_event["analysis"]["trajectory"]["direction"] = direction
+                            fall_event["analysis"]["trajectory"]["startPoint"] = [start_x, 0, start_z]
+                            fall_event["analysis"]["trajectory"]["endPoint"] = [end_x, 0, end_z]
+                            
+                            # Add body parts for visualization
+                            if direction == "forward":
+                                fall_event["analysis"]["bodyImpactSequence"] = [
+                                    {"name": "hands", "position": [end_x, 0.3, end_z-0.5], "impact": 0.7},
+                                    {"name": "knees", "position": [end_x, 0.3, end_z], "impact": 0.6},
+                                    {"name": "head", "position": [end_x, 0.7, end_z-1], "impact": 0.9}
+                                ]
+                            elif direction == "backward":
+                                fall_event["analysis"]["bodyImpactSequence"] = [
+                                    {"name": "back", "position": [end_x, 0.3, end_z+0.5], "impact": 0.8},
+                                    {"name": "head", "position": [end_x, 0.7, end_z+1], "impact": 0.7}
+                                ]
+                            elif direction == "left":
+                                fall_event["analysis"]["bodyImpactSequence"] = [
+                                    {"name": "left arm", "position": [end_x-0.5, 0.3, end_z], "impact": 0.7},
+                                    {"name": "left hip", "position": [end_x-0.3, 0.3, end_z], "impact": 0.8},
+                                    {"name": "head", "position": [end_x-1, 0.7, end_z], "impact": 0.6}
+                                ]
+                            else:  # right
+                                fall_event["analysis"]["bodyImpactSequence"] = [
+                                    {"name": "right arm", "position": [end_x+0.5, 0.3, end_z], "impact": 0.7},
+                                    {"name": "right hip", "position": [end_x+0.3, 0.3, end_z], "impact": 0.8},
+                                    {"name": "head", "position": [end_x+1, 0.7, end_z], "impact": 0.6}
+                                ]
+                            
+                            # Add impact points to trajectory
+                            fall_event["analysis"]["trajectory"]["impactPoints"] = impact_points[:3]  # Limit to 3 points
+                
+                # Add fall probability to each frame
+                for frame in fall_event["frames"]:
+                    # Add fall probability that increases over time for fall sequences
+                    frame_idx = fall_event["frames"].index(frame)
+                    progress = frame_idx / max(1, len(fall_event["frames"]) - 1)
+                    
+                    if fall_event["fallDetected"]:
+                        # For fall sequences, probability rises from 0.1 to 0.9
+                        frame["fallProbability"] = 0.1 + (0.8 * progress)
+                    else:
+                        # For non-fall sequences, probability stays low
+                        frame["fallProbability"] = 0.05 + (0.1 * progress)
+                
+                sequences.append(fall_event)
+        
+        return jsonify({
+            'filename': filename,
+            'sequences': sequences,
+            'count': len(sequences)
+        })
+    except Exception as e:
+        logger.error(f"Error loading training sequence: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
         }), 500
 
 if __name__ == '__main__':

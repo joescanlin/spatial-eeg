@@ -8,6 +8,8 @@ import SensorGrid from './SensorGrid';
 import CameraController from './CameraController';
 // @ts-ignore
 import MovementTracker from './MovementTracker';
+// @ts-ignore
+import FallEffects from './FallEffects';
 
 interface Grid3DContainerProps {
   data: GridData;
@@ -43,6 +45,12 @@ export default function Grid3DContainer({ data, isVisible }: Grid3DContainerProp
         
         {/* Movement tracking visualization */}
         <MovementTracker data={data} />
+        
+        {/* Fall effects visualization */}
+        <FallEffects 
+          fallDetected={data.fallDetected}
+          fallProbability={data.fallProbability}
+        />
         
         {/* Camera control and positioning - only when not in manual mode */}
         {!manualControl && (
