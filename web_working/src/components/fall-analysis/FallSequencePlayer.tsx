@@ -9,6 +9,7 @@ import {
   FallEventFrame, 
   PlaybackStatus 
 } from '../../services/FallEventCapture';
+import { throttle } from 'lodash';
 
 interface FallSequencePlayerProps {
   fallEvent: FallEvent;
@@ -49,6 +50,21 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
   const sliderRef = useRef<HTMLInputElement>(null);
   // Playback frame buffer for smoother transitions
   const frameBufferRef = useRef<FallEventFrame[]>([]);
+  // Current frame index ref for immediate access without state updates
+  const currentFrameIndexRef = useRef<number>(0);
+  // Cache of frame renders to avoid redundant processing
+  const frameRenderCacheRef = useRef<Map<number, FallEventFrame>>(new Map());
+  // Flag to track if buffer is fully loaded
+  const isBufferLoadedRef = useRef<boolean>(false);
+
+  // Throttled version of the onFrameChange callback to prevent excessive updates
+  const throttledFrameUpdate = useRef(
+    throttle((frame: FallEventFrame) => {
+      if (onFrameChange) {
+        onFrameChange(frame);
+      }
+    }, 16) // ~60fps
+  ).current;
   
   // Find key frames in the fall sequence
   useEffect(() => {
@@ -128,39 +144,53 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
     return totalPressure;
   };
   
-  // Set up playback on component mount
+  // Set up playback and frame buffer on component mount
   useEffect(() => {
     try {
       if (!fallEvent || !fallEvent.frames.length) return;
       
+      console.log("===== INITIALIZING FALL SEQUENCE PLAYER =====");
       setTotalFrames(fallEvent.frames.length);
+      
       // Ensure frameBuffer is populated immediately and completely
       frameBufferRef.current = [...fallEvent.frames];
       console.log(`Frame buffer populated with ${frameBufferRef.current.length} frames`);
       
-      // Verify all frames are correctly loaded
+      // Pre-cache all frames to avoid processing during scrubbing
+      const newCache = new Map<number, FallEventFrame>();
+      fallEvent.frames.forEach((frame, index) => {
+        newCache.set(index, frame);
+      });
+      frameRenderCacheRef.current = newCache;
+      
+      // Verify all frames are correctly loaded and cached
       if (frameBufferRef.current.length !== fallEvent.frames.length) {
         console.error(`Frame buffer mismatch: ${frameBufferRef.current.length} vs ${fallEvent.frames.length}`);
         // Force a re-copy to ensure all frames are available
         frameBufferRef.current = [...fallEvent.frames];
+      } else {
+        isBufferLoadedRef.current = true;
+        console.log("✅ Frame buffer fully loaded and cached");
       }
       
-      // Register for playback updates
+      // Register for playback updates - using the service's callback system
       const unregister = fallEventCapture.registerPlaybackCallback((frame) => {
         try {
           if (frame) {
             setCurrentFrame(frame);
             const index = fallEvent.frames.findIndex(f => f.timestamp === frame.timestamp);
-            setCurrentFrameIndex(index >= 0 ? index : 0);
-            setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
-            
-            // Call parent callback if provided
-            if (onFrameChange) {
-              onFrameChange(frame);
+            if (index >= 0) {
+              setCurrentFrameIndex(index);
+              currentFrameIndexRef.current = index;
+              setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
+              
+              // Call parent callback if provided (throttled)
+              throttledFrameUpdate(frame);
             }
           } else {
             setCurrentFrame(null);
             setCurrentFrameIndex(0);
+            currentFrameIndexRef.current = 0;
           }
         } catch (error) {
           console.error("Error in playback callback:", error);
@@ -170,6 +200,8 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
       // Clean up on unmount
       return () => {
         try {
+          // Cancel any pending throttled updates
+          throttledFrameUpdate.cancel();
           unregister();
           fallEventCapture.stopPlayback();
         } catch (error) {
@@ -179,30 +211,32 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
     } catch (error) {
       console.error("Error setting up playback:", error);
     }
-  }, [fallEvent, onFrameChange]);
+  }, [fallEvent, throttledFrameUpdate]);
   
   // Initialize with the first frame
   useEffect(() => {
     try {
+      // Wait for buffer to be loaded before initializing
+      if (!isBufferLoadedRef.current || !fallEvent?.frames?.length) return;
+      
       // Show the first frame by default when component mounts or fallEvent changes
-      if (fallEvent?.frames?.length > 0) {
-        const firstFrame = fallEvent.frames[0];
-        console.log("Initializing with first frame");
-        
-        // Update local state
-        setCurrentFrame(firstFrame);
-        setCurrentFrameIndex(0);
-        setTimestamp(new Date(firstFrame.timestamp).toLocaleTimeString());
-        
-        // Notify parent
-        if (onFrameChange) {
-          onFrameChange(firstFrame);
-        }
+      const firstFrame = fallEvent.frames[0];
+      console.log("Initializing with first frame");
+      
+      // Update local state
+      setCurrentFrame(firstFrame);
+      setCurrentFrameIndex(0);
+      currentFrameIndexRef.current = 0;
+      setTimestamp(new Date(firstFrame.timestamp).toLocaleTimeString());
+      
+      // Notify parent
+      if (onFrameChange) {
+        onFrameChange(firstFrame);
       }
     } catch (error) {
       console.error("Error initializing first frame:", error);
     }
-  }, [fallEvent, onFrameChange]);
+  }, [fallEvent, isBufferLoadedRef.current]);
   
   // Update local state when playback settings change
   useEffect(() => {
@@ -268,41 +302,70 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
     }
   };
   
-  // Handle timeline slider change
+  // Function to safely get a frame at a specific index with validation
+  const getFrameAtIndex = (index: number): FallEventFrame | null => {
+    try {
+      // First check the cache
+      if (frameRenderCacheRef.current.has(index)) {
+        return frameRenderCacheRef.current.get(index) || null;
+      }
+      
+      // Validate index
+      if (index < 0 || index >= frameBufferRef.current.length) {
+        console.warn(`Invalid frame index: ${index}, max: ${frameBufferRef.current.length - 1}`);
+        return null;
+      }
+      
+      // Get from buffer and add to cache
+      const frame = frameBufferRef.current[index];
+      if (frame) {
+        frameRenderCacheRef.current.set(index, frame);
+        return frame;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Error getting frame at index:", error);
+      return null;
+    }
+  };
+  
+  // Update frame directly without waiting for state update
+  const updateFrameDisplay = (index: number): void => {
+    try {
+      // Get the frame and update all relevant state atomically
+      const frame = getFrameAtIndex(index);
+      if (!frame) return;
+      
+      // Update UI state for immediate feedback
+      currentFrameIndexRef.current = index;
+      setCurrentFrameIndex(index);
+      setCurrentFrame(frame);
+      setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
+      
+      // Update parent immediately
+      if (onFrameChange) {
+        throttledFrameUpdate(frame);
+      }
+    } catch (error) {
+      console.error("Error updating frame display:", error);
+    }
+  };
+  
+  // Handle timeline slider change - completely revised for smoothness
   const handleTimelineChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
-      if (!frameBufferRef.current || frameBufferRef.current.length === 0) {
-        console.error("Frame buffer not initialized");
+      if (!isBufferLoadedRef.current) {
+        console.warn("Frame buffer not fully loaded");
         return;
       }
       
       const index = parseInt(e.target.value, 10);
       
-      // Validate index is within bounds
-      if (index < 0 || index >= frameBufferRef.current.length) {
-        console.warn(`Timeline index out of bounds: ${index} (max: ${frameBufferRef.current.length - 1})`);
-        return;
-      }
-      
-      // Update current index immediately for UI responsiveness
-      setCurrentFrameIndex(index);
-      
-      // Get the frame at this index
-      const frame = frameBufferRef.current[index];
-      if (!frame) {
-        console.error(`No frame at index ${index}`);
-        return;
-      }
-      
-      // Update UI state for immediate feedback
-      setCurrentFrame(frame);
-      setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
-      
-      // Call parent callback for immediate visual update
-      if (onFrameChange) {
-        console.log(`Timeline change: updating to frame ${index}`);
-        onFrameChange(frame);
-      }
+      // Immediate update using ref-based approach for smooth scrubbing
+      requestAnimationFrame(() => {
+        updateFrameDisplay(index);
+      });
       
       // If we're playing, pause to allow manual scrubbing
       if (playbackStatus === 'playing') {
@@ -325,32 +388,29 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
   const handleTimelineMouseUp = () => {
     if (isDragging) {
       setIsDragging(false);
-      console.log(`Timeline scrub complete: seeking to frame ${currentFrameIndex}`);
+      console.log(`Timeline scrub complete: seeking to frame ${currentFrameIndexRef.current}`);
       
       try {
         // Validate currentFrameIndex is within bounds before seeking
-        if (currentFrameIndex < 0 || currentFrameIndex >= fallEvent.frames.length) {
-          console.error(`Invalid frame index: ${currentFrameIndex}, max: ${fallEvent.frames.length - 1}`);
-          return;
-        }
-        
-        // Get the current frame to ensure we're passing the correct data
-        const frame = frameBufferRef.current[currentFrameIndex];
-        if (!frame) {
-          console.error(`No frame found at index ${currentFrameIndex}`);
+        if (currentFrameIndexRef.current < 0 || currentFrameIndexRef.current >= fallEvent.frames.length) {
+          console.error(`Invalid frame index: ${currentFrameIndexRef.current}, max: ${fallEvent.frames.length - 1}`);
           return;
         }
         
         // Update the global playback state
-        fallEventCapture.seekToFrame(currentFrameIndex, fallEvent.id);
+        fallEventCapture.seekToFrame(currentFrameIndexRef.current, fallEvent.id);
         
-        // Ensure our local state is also updated 
-        setCurrentFrame(frame);
-        setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
-        
-        // Update the parent component to ensure visuals update immediately
-        if (onFrameChange) {
-          onFrameChange(frame);
+        // Get the frame again to ensure we're using the latest
+        const frame = getFrameAtIndex(currentFrameIndexRef.current);
+        if (frame) {
+          // Final update to ensure everything is in sync
+          setCurrentFrame(frame);
+          setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
+          
+          // Force a final parent update for consistency
+          if (onFrameChange) {
+            onFrameChange(frame);
+          }
         }
       } catch (error) {
         console.error("Error completing timeline scrub:", error);

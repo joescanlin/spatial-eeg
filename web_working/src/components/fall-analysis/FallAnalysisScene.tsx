@@ -60,6 +60,10 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
   const [previousFrames, setPreviousFrames] = useState<FallEventFrame[]>([]);
   const MAX_PREVIOUS_FRAMES = 10;
   
+  // Add a new reference to track the human model position
+  const humanPositionRef = useRef<[number, number, number]>([0, 0, 0]);
+  const isInitialRenderRef = useRef(true);
+
   // Handle frame changes from the sequence player
   const handleFrameChange = (frame: FallEventFrame) => {
     try {
@@ -324,6 +328,105 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
     }
   };
   
+  // Force human model to correct start position on initial render
+  useEffect(() => {
+    if (!fallEvent?.id?.includes('realistic-backward-fall')) return;
+    
+    // This effect forces the human model to the correct starting position
+    console.log("INITIALIZING HUMAN POSITION FOR BACKWARD FALL");
+    
+    // Explicitly set human starting position at grid bottom edge (row 13-14)
+    // This forced position will override any calculated position for frame 0
+    const startPosition: [number, number, number] = [
+      // Centered horizontally (around column 6)
+      6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2,
+      0, // Ground level
+      // At the bottom edge (row 13-14)
+      13 * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+    ];
+    
+    // Store in ref for consistent access
+    humanPositionRef.current = startPosition;
+    console.log("FORCE STARTING POSITION:", startPosition);
+    
+    // Mark initial render complete
+    isInitialRenderRef.current = false;
+  }, [fallEvent?.id]);
+
+  // Track frame index changes to update human position
+  useEffect(() => {
+    if (!fallEvent?.id?.includes('realistic-backward-fall')) return;
+    
+    // Don't run during initial render (handled by the other effect)
+    if (isInitialRenderRef.current) return;
+    
+    // Update position based on current frame index
+    const newPosition = calculatePositionForFrame(currentFrameIndex);
+    humanPositionRef.current = newPosition;
+    console.log(`UPDATED POSITION for frame ${currentFrameIndex}:`, newPosition);
+  }, [currentFrameIndex]);
+
+  // Dedicated function to calculate position based on frame index
+  const calculatePositionForFrame = (frameIdx: number): [number, number, number] => {
+    if (!fallEvent?.id?.includes('realistic-backward-fall')) {
+      // For non-backward falls, use default trajectory
+      return calculatePositionAlongTrajectory() as [number, number, number];
+    }
+    
+    // Special handling for frame 0 - always force to start position
+    if (frameIdx === 0) {
+      return [
+        6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2, 
+        0, 
+        13 * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+      ];
+    }
+    
+    // Walking phase (frames 1-8)
+    if (frameIdx < 9) {
+      const walkProgress = frameIdx / 8;
+      return [
+        // Stay centered horizontally
+        6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2,
+        0,
+        // Move from row 13 toward row 8 (40% up the grid)
+        (13 - walkProgress * 5) * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+      ];
+    }
+    
+    // Transition phase (frames 9-12)
+    if (frameIdx < 13) {
+      const transitionProgress = (frameIdx - 9) / 4;
+      return [
+        // Stay centered horizontally
+        6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2,
+        0,
+        // Subtle movement from row 8 to row 7
+        (8 - transitionProgress * 1) * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+      ];
+    }
+    
+    // Fall phase (frames 13-25)
+    if (frameIdx < 26) {
+      const fallProgress = Math.min(1, (frameIdx - 13) / (25 - 13));
+      const easedProgress = fallProgress * fallProgress; // Quadratic easing
+      return [
+        // Stay centered horizontally
+        6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2,
+        0,
+        // Fall from row 7 to row 4
+        (7 - easedProgress * 3) * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+      ];
+    }
+    
+    // Final position (frames 26+)
+    return [
+      6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2,
+      0,
+      4 * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+    ];
+  };
+  
   return (
     <div className="w-full h-full bg-gray-900 relative flex flex-col">
       {/* Main 3D view area */}
@@ -538,7 +641,7 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
               bodyParts={fallEvent.analysis.bodyImpactSequence}
               fallDirection={fallEvent.analysis.trajectory?.direction || 'forward'}
               highlightImpact={highlightImpact && isFalling}
-              position={calculatePositionAlongTrajectory() as [number, number, number]}
+              position={humanPositionRef.current}
               rotation={[0, Math.PI, 0]}
               isWalking={isWalking && animateModel}
               isFalling={isFalling && animateModel}

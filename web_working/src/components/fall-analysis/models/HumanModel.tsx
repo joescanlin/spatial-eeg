@@ -299,7 +299,9 @@ export default function HumanModel({
     
     // Calculate walk cycle progress only if needed
     if (isWalking) {
-      walkCycleRef.current += 0.05; // Increment walk cycle continuously
+      // For consistent scrubbing, use frameIndex to determine walk cycle phase
+      // This ensures walk cycle is tied to frame position rather than just elapsed time
+      walkCycleRef.current = frameIndex * 0.2; // Scale factor for appropriate cycle speed
     }
     
     // Get limb references - use both formats to ensure compatibility
@@ -312,65 +314,96 @@ export default function HumanModel({
     const rightArm = groupRef.current.getObjectByName('right-arm') || 
                      groupRef.current.getObjectByName('rightArm');
     
-    // Apply walking animations
-    if (isWalking && animateModel) {
-      // Apply inverse walk cycle to legs (when one is forward, the other is back)
-      if (leftLeg) {
-        leftLeg.rotation.x = Math.sin(walkCycleRef.current) * 0.3;
-      }
-      if (rightLeg) {
-        rightLeg.rotation.x = Math.sin(walkCycleRef.current + Math.PI) * 0.3;
-      }
-      
-      // Arms swing opposite to legs
-      if (leftArm) {
-        leftArm.rotation.x = Math.sin(walkCycleRef.current + Math.PI) * 0.2;
-      }
-      if (rightArm) {
-        rightArm.rotation.x = Math.sin(walkCycleRef.current) * 0.2;
-      }
-    }
-    
-    // Apply falling animations based on isFalling state
-    if (isFalling && animateModel) {
-      const fallDirection = getBodyPartColor('fall-direction') === BODY_COLORS.default ? 'backward' : 'forward';
-      
-      // Handle falling in specific direction
-      if (fallDirection === 'backward') {
-        // Apply backward falling rotation to whole model
-        groupRef.current.rotation.x = -Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
+    // Apply animations based on frame position rather than continuous time
+    // This makes scrubbing work correctly
+    if (animateModel) {
+      if (isWalking) {
+        // Walking animations
+        const walkPhase = walkCycleRef.current;
         
-        // Arms extend outward during backward fall
+        // Apply inverse walk cycle to legs (when one is forward, the other is back)
+        if (leftLeg) {
+          leftLeg.rotation.x = Math.sin(walkPhase) * 0.3;
+        }
+        if (rightLeg) {
+          rightLeg.rotation.x = Math.sin(walkPhase + Math.PI) * 0.3;
+        }
+        
+        // Arms swing opposite to legs
         if (leftArm) {
-          leftArm.rotation.z = Math.min(fallProgress * 0.7, 0.7);
+          leftArm.rotation.x = Math.sin(walkPhase + Math.PI) * 0.2;
         }
         if (rightArm) {
-          rightArm.rotation.z = -Math.min(fallProgress * 0.7, 0.7);
+          rightArm.rotation.x = Math.sin(walkPhase) * 0.2;
         }
-      } else if (fallDirection === 'forward') {
-        // Apply forward falling rotation to whole model
-        groupRef.current.rotation.x = Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
-        
-        // Arms extend forward during forward fall
-        if (leftArm) {
-          leftArm.rotation.z = Math.min(fallProgress * 0.4, 0.4);
-        }
-        if (rightArm) {
-          rightArm.rotation.z = -Math.min(fallProgress * 0.4, 0.4);
-        }
-      } else if (fallDirection === 'right') {
-        // Apply rightward falling rotation to whole model
-        groupRef.current.rotation.z = Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
-      } else if (fallDirection === 'left') {
-        // Apply leftward falling rotation to whole model
-        groupRef.current.rotation.z = -Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
+      } else if (isFalling) {
+        // Fall animations - directly use fallProgress
+        applyFallingAnimation();
+      } else {
+        // Apply neutral standing pose
+        applyNeutralPose();
       }
     } else {
-      // Apply neutral standing pose
+      // Reset to neutral if animations are disabled
       applyNeutralPose();
     }
   });
   
+  // Apply falling animations based on frame index and fall direction
+  const applyFallingAnimation = () => {
+    if (!groupRef.current) return;
+    
+    // Calculate fall progress directly from frameIndex for consistent scrubbing
+    const frameBasedProgress = Math.min(1, frameIndex / (totalFrames * 0.6));
+    
+    // Resolve fall direction, with backward as default
+    const effectiveFallDirection = fallDirection === 'backward' ? 'backward' :
+                                  fallDirection === 'forward' ? 'forward' :
+                                  fallDirection === 'left' ? 'left' :
+                                  fallDirection === 'right' ? 'right' : 'backward';
+                                  
+    // Get limb references
+    const leftLeg = groupRef.current.getObjectByName('left-leg') || 
+                    groupRef.current.getObjectByName('leftLeg');
+    const rightLeg = groupRef.current.getObjectByName('right-leg') || 
+                     groupRef.current.getObjectByName('rightLeg');
+    const leftArm = groupRef.current.getObjectByName('left-arm') || 
+                    groupRef.current.getObjectByName('leftArm');
+    const rightArm = groupRef.current.getObjectByName('right-arm') || 
+                     groupRef.current.getObjectByName('rightArm');
+    
+    // Apply fall rotation based on direction
+    if (effectiveFallDirection === 'backward') {
+      // Apply backward falling rotation to whole model
+      groupRef.current.rotation.x = -Math.min(Math.PI / 2 * frameBasedProgress, Math.PI / 2);
+      
+      // Arms extend outward during backward fall
+      if (leftArm) {
+        leftArm.rotation.z = Math.min(frameBasedProgress * 0.7, 0.7);
+      }
+      if (rightArm) {
+        rightArm.rotation.z = -Math.min(frameBasedProgress * 0.7, 0.7);
+      }
+    } else if (effectiveFallDirection === 'forward') {
+      // Apply forward falling rotation to whole model
+      groupRef.current.rotation.x = Math.min(Math.PI / 2 * frameBasedProgress, Math.PI / 2);
+      
+      // Arms extend forward during forward fall
+      if (leftArm) {
+        leftArm.rotation.z = Math.min(frameBasedProgress * 0.4, 0.4);
+      }
+      if (rightArm) {
+        rightArm.rotation.z = -Math.min(frameBasedProgress * 0.4, 0.4);
+      }
+    } else if (effectiveFallDirection === 'right') {
+      // Apply rightward falling rotation to whole model
+      groupRef.current.rotation.z = Math.min(Math.PI / 2 * frameBasedProgress, Math.PI / 2);
+    } else if (effectiveFallDirection === 'left') {
+      // Apply leftward falling rotation to whole model
+      groupRef.current.rotation.z = -Math.min(Math.PI / 2 * frameBasedProgress, Math.PI / 2);
+    }
+  };
+
   // Apply a neutral standing pose
   const applyNeutralPose = () => {
     if (!groupRef.current) return;

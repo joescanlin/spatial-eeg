@@ -816,15 +816,32 @@ class FallEventCaptureService {
   // Seek to a specific frame
   seekToFrame(frameIndex: number, fallEventId: string): void {
     try {
+      console.log(`Seeking to frame ${frameIndex} for event ${fallEventId}`);
       const fallEvent = this.getFallEvent(fallEventId);
-      if (!fallEvent || !fallEvent.frames.length) return;
+      if (!fallEvent || !fallEvent.frames.length) {
+        console.error(`Cannot seek: fall event ${fallEventId} not found or has no frames`);
+        return;
+      }
       
       // Ensure index is within bounds
       const index = Math.max(0, Math.min(frameIndex, fallEvent.frames.length - 1));
+      
+      // Update current playback state
+      this.playbackStatus = 'paused';
       this.playbackSettings.currentFrameIndex = index;
       
+      // Cache the frame for quick access
+      const targetFrame = fallEvent.frames[index];
+      if (!targetFrame) {
+        console.error(`No frame found at index ${index}`);
+        return;
+      }
+      
+      // Log detailed seek information for debugging
+      console.log(`Seeking to frame ${index}/${fallEvent.frames.length - 1}, timestamp: ${new Date(targetFrame.timestamp).toLocaleTimeString()}`);
+      
       // Trigger callback for the new frame
-      this.triggerPlaybackCallbacks(fallEvent.frames[index]);
+      this.triggerPlaybackCallbacks(targetFrame);
     } catch (error) {
       console.error("Error seeking to frame:", error);
     }
