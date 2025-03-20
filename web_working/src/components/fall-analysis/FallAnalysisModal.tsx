@@ -27,8 +27,24 @@ export default function FallAnalysisModal({ fallEvent, isOpen, onClose }: FallAn
       isOpen, 
       hasEvent: !!fallEvent, 
       eventId: fallEvent?.id,
-      frameCount: fallEvent?.frames?.length || 0
+      frameCount: fallEvent?.frames?.length || 0,
+      fallDetected: fallEvent?.fallDetected
     });
+    
+    // Add more detailed logging for debugging
+    if (fallEvent) {
+      if (!fallEvent.frames || fallEvent.frames.length === 0) {
+        console.error("FallAnalysisModal received fall event with no frames:", fallEvent);
+      } else {
+        console.log(`FallAnalysisModal received event with ${fallEvent.frames.length} frames`);
+        
+        // Verify frames have frame data
+        const invalidFrames = fallEvent.frames.filter(frame => !frame.frame || !Array.isArray(frame.frame));
+        if (invalidFrames.length > 0) {
+          console.error(`Found ${invalidFrames.length} frames with invalid data!`, invalidFrames);
+        }
+      }
+    }
   }, [isOpen, fallEvent]);
   
   // If modal is not open, don't render anything

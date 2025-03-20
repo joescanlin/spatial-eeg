@@ -9,6 +9,11 @@ import FallSequencePlayer from './FallSequencePlayer';
 import FallEffects from '../3d/FallEffects';
 import ErrorBoundary from '../ErrorBoundary';
 
+// Constants for grid dimensions
+const GRID_WIDTH = 12;  // 12 columns in the sensor grid
+const GRID_HEIGHT = 15; // 15 rows in the sensor grid
+const CELL_SIZE = 0.16; // 4 inches * 0.04 scale factor
+
 interface FallAnalysisSceneProps {
   fallEvent: FallEvent;
   showStats?: boolean;
@@ -69,11 +74,14 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
         });
       }
       
+      // Log frame transition for debugging
+      const frameIndex = fallEvent.frames.findIndex(f => f.timestamp === frame.timestamp);
+      console.log(`Frame transition: ${currentFrameIndex} -> ${frameIndex}, probability: ${frame.fallProbability.toFixed(2)}`);
+
       setCurrentFrame(frame);
       setFallProbability(frame?.fallProbability || 0);
       
       // Track frame index for animations
-      const frameIndex = fallEvent.frames.findIndex(f => f.timestamp === frame.timestamp);
       setCurrentFrameIndex(frameIndex >= 0 ? frameIndex : 0);
       
       // Determine if we're in walking or falling state based on probability thresholds
@@ -88,10 +96,36 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
   // Get the frame to display - either from playback or highest pressure frame
   const getDisplayFrame = () => {
     try {
-      if (currentFrame) {
-        return currentFrame.frame;
+      if (!currentFrame || !currentFrame.frame) {
+        // Fallback to highest pressure frame if no frame is provided
+        console.log("No current frame data, using highest pressure frame");
+        return getHighestPressureFrame();
       }
-      return getHighestPressureFrame();
+      
+      // Validate frame data before returning
+      if (!Array.isArray(currentFrame.frame) || currentFrame.frame.length === 0) {
+        console.warn("Invalid frame data structure, using fallback");
+        return getHighestPressureFrame();
+      }
+      
+      // For realistic backward fall, ensure pressure data matches the human model position
+      const isRealisticBackwardFall = fallEvent.id?.includes('realistic-backward-fall');
+      if (isRealisticBackwardFall) {
+        console.log(`Using pressure data for realistic fall, frame index: ${currentFrameIndex}`);
+        
+        // Make sure we're using the correct frame from the sequence
+        const frameIndex = fallEvent.frames.findIndex(f => f.timestamp === currentFrame.timestamp);
+        if (frameIndex !== currentFrameIndex) {
+          console.warn(`Frame index mismatch: currentFrameIndex=${currentFrameIndex}, frame data index=${frameIndex}`);
+          
+          // Try to find the correct pressure data for this frame
+          if (currentFrameIndex >= 0 && currentFrameIndex < fallEvent.frames.length) {
+            return fallEvent.frames[currentFrameIndex].frame;
+          }
+        }
+      }
+      
+      return currentFrame.frame;
     } catch (error) {
       console.error("Error getting display frame:", error);
       return [[]]; // Return empty frame as fallback
@@ -131,11 +165,11 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
   const getCameraPosition = () => {
     switch (viewMode) {
       case 'top':
-        return [0, 10, 0] as [number, number, number]; // Top-down view
+        return [0, 5, 0] as [number, number, number]; // Top-down view, closer
       case 'side': 
-        return [10, 2, 0] as [number, number, number]; // Side view
+        return [5, 1.5, 0] as [number, number, number]; // Side view, closer
       default:
-        return [8, 5, 8] as [number, number, number]; // Isometric view
+        return [2.5, 2, 2.5] as [number, number, number]; // Isometric view - much closer to the grid
     }
   };
   
@@ -160,36 +194,129 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
   // Calculate position along trajectory based on current frame progress
   const calculatePositionAlongTrajectory = () => {
     try {
-      if (!currentFrame || !fallEvent.analysis?.trajectory || currentFrameIndex === 0) {
-        // Return start point if no frame or at beginning
-        return fallEvent.analysis?.trajectory?.startPoint 
-          ? [
-              fallEvent.analysis.trajectory.startPoint[0] * 0.16, // Scale by 0.16 (4" * 0.04)
-              0, 
-              fallEvent.analysis.trajectory.startPoint[2] * 0.16  // Scale by 0.16 (4" * 0.04)
-            ] 
-          : [0, 0, 0];
+      if (!fallEvent.analysis?.trajectory) {
+        console.warn("No trajectory data available");
+        return [0, 0, 0];
       }
-      
-      // Calculate progress ratio (0-1)
-      const frameProgress = currentFrameIndex / fallEvent.frames.length;
       
       // Get starting and ending points
       const startPoint = fallEvent.analysis.trajectory.startPoint;
       const endPoint = fallEvent.analysis.trajectory.endPoint;
       
-      if (!startPoint || !endPoint) return [0, 0, 0];
+      if (!startPoint || !endPoint) {
+        console.warn("Missing start or end point in trajectory");
+        return [0, 0, 0];
+      }
       
-      // Interpolate between start and end points based on progress
-      // We don't interpolate fully to the end until we reach 0.7 progress
-      // to give more time for the falling animation at the fall location
-      const interpolationFactor = Math.min(1, frameProgress / 0.7);
+      // Check if this is a realistic backward fall (special handling)
+      const isRealisticBackwardFall = fallEvent.id?.includes('realistic-backward-fall');
       
-      // Calculate position with proper scaling (4" * 0.04 = 0.16 units per grid cell)
+      // Default starting position even when no current frame
+      if (!currentFrame && currentFrameIndex === 0) {
+        // Start at the correct end of the sensor array (standardized starting position)
+        console.log("Using default start position for frame 0");
+        
+        if (isRealisticBackwardFall) {
+          // For realistic backward fall, explicitly start at bottom edge (row 14)
+          // This matches the pressure data where the person starts at the bottom of the 15x12 grid
+          return [
+            // Center horizontally at columns 5-7 (where the feet are placed in frame 0-2)
+            6 * 0.16 - (GRID_WIDTH * 0.16) / 2, 
+            0, 
+            // Bottom edge of grid (row 13-14) - accounting for grid centering
+            13 * 0.16 - (GRID_HEIGHT * 0.16) / 2 
+          ];
+        }
+        
+        // For other falls, use the defined start point
+        return [
+          startPoint[0] * 0.16, 
+          0, 
+          startPoint[2] * 0.16
+        ];
+      }
+      
+      // Calculate overall progress ratio (0-1)
+      const frameProgress = currentFrameIndex / Math.max(1, fallEvent.frames.length - 1);
+      
+      // Special handling for realistic backward fall with clearer phase transitions
+      if (isRealisticBackwardFall) {
+        // Log current phase for debugging
+        console.log(`Frame ${currentFrameIndex}: phase=${
+          currentFrameIndex < 9 ? "walking" : 
+          currentFrameIndex < 13 ? "transition" : 
+          currentFrameIndex < 26 ? "falling" : "final"
+        }, progress=${frameProgress.toFixed(2)}`);
+        
+        // Different phases of the fall sequence
+        // 0-8: Walking phase
+        // 9-12: Transition phase
+        // 13-25: Impact sequence
+        // 26-45: Final position
+        
+        // For the realistic backward fall, calculate the position using grid coordinates
+        // Use the module-level constants instead of redefining them
+        
+        if (currentFrameIndex < 9) {
+          // Walking phase - from row 14 (bottom edge) toward middle of grid
+          const walkProgress = currentFrameIndex / 8;
+          
+          // Start at bottom edge (row 13-14), walk toward row 7-8 (40% up the grid)
+          // Horizontally centered around columns 5-7
+          return [
+            6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2, // Stay centered horizontally
+            0,
+            // Move from bottom (row 14) up toward row ~9 (40% up the grid)
+            (13 - walkProgress * 5) * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+          ];
+        } else if (currentFrameIndex < 13) {
+          // Transition phase - subtle movement as balance is lost
+          const transitionProgress = (currentFrameIndex - 9) / 4;
+          
+          // During transition, slight movement continues
+          return [
+            6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2, // Stay centered horizontally
+            0,
+            // Subtle movement from row ~9 to row ~8
+            (8 - transitionProgress * 1) * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+          ];
+        } else if (currentFrameIndex < 26) {
+          // Fall and impact phases - accelerating movement to final position
+          const fallProgress = Math.min(1, (currentFrameIndex - 13) / (25 - 13));
+          
+          // Non-linear easing for more realistic movement
+          const easedProgress = fallProgress * fallProgress; // Quadratic easing
+          
+          // Fall from row ~8 toward row 3-5 (where upper body ends up)
+          return [
+            6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2, // Stay centered horizontally
+            0,
+            // Move from row 8 to row ~4 (where head/shoulders impact)
+            (7 - easedProgress * 3) * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+          ];
+        } else {
+          // Final position - at rest
+          return [
+            6 * CELL_SIZE - (GRID_WIDTH * CELL_SIZE) / 2, // Centered horizontally
+            0,
+            // Final position around row 4
+            4 * CELL_SIZE - (GRID_HEIGHT * CELL_SIZE) / 2
+          ];
+        }
+      }
+      
+      // For other falls, use improved interpolation with easing
+      // Add subtle easing for more natural movement
+      const easeInOutQuad = (t: number) => {
+        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      };
+      
+      const easedProgress = easeInOutQuad(frameProgress);
+      
       return [
-        (startPoint[0] + (endPoint[0] - startPoint[0]) * interpolationFactor) * 0.16,
+        (startPoint[0] + (endPoint[0] - startPoint[0]) * easedProgress) * 0.16,
         0, // Keep y at ground level
-        (startPoint[2] + (endPoint[2] - startPoint[2]) * interpolationFactor) * 0.16
+        (startPoint[2] + (endPoint[2] - startPoint[2]) * easedProgress) * 0.16
       ];
     } catch (error) {
       console.error("Error calculating position along trajectory:", error);
@@ -311,7 +438,7 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
           ref={canvasRef}
           camera={{ 
             position: getCameraPosition(), 
-            fov: 50
+            fov: 35
           }}
           shadows
           className="w-full h-full"
@@ -433,7 +560,12 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
           )}
           
           {/* Camera controls */}
-          <OrbitControls target={[0, 1, 0]} maxPolarAngle={Math.PI / 2 - 0.1} />
+          <OrbitControls 
+            target={[0, 0, 0]} 
+            maxPolarAngle={Math.PI / 2 - 0.1}
+            minDistance={1.5}
+            maxDistance={10} 
+          />
           
           {/* Stats (if enabled) */}
           {showStats && <Stats />}

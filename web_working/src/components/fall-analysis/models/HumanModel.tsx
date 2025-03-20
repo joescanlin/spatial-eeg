@@ -22,6 +22,7 @@ interface HumanModelProps {
   previousFrames?: FallEventFrame[];
   showCenterOfGravity?: boolean;
   showGhostTrail?: boolean;
+  animateModel?: boolean;
 }
 
 // Scale constants - each grid cell is approximately 4 inches (0.33 feet)
@@ -68,7 +69,8 @@ export default function HumanModel({
   currentFrame = null,
   previousFrames = [],
   showCenterOfGravity = false,
-  showGhostTrail = false
+  showGhostTrail = false,
+  animateModel = true
 }: HumanModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const walkCycleRef = useRef(0);
@@ -104,12 +106,35 @@ export default function HumanModel({
     return Math.min(1, frameIndex / (totalFrames * 0.6));
   }, [isFalling, frameIndex, totalFrames]);
 
-  // Calculate foot positions from pressure data
+  // Get animation state based on frame index
   useEffect(() => {
-    if (!currentFrame?.frame || !Array.isArray(currentFrame.frame)) return;
+    // Only update animation state if we have current frame data
+    if (currentFrame) {
+      // For walking, ensure smooth transitions
+      if (isWalking) {
+        walkCycleRef.current += 0.05; // Increment walk cycle continuously
+      } else {
+        // Reset walk cycle when not walking
+        walkCycleRef.current = 0;
+      }
+      
+      // Map footstep pattern based on frame data
+      if (currentFrame.frame && Array.isArray(currentFrame.frame)) {
+        try {
+          // Use pressure data to adjust foot positions if available
+          calculateFootPositionsFromPressure(currentFrame.frame);
+        } catch (error) {
+          console.error("Error calculating foot positions:", error);
+        }
+      }
+    }
+  }, [currentFrame, isWalking, isFalling]);
+  
+  // Calculate foot positions from pressure data
+  const calculateFootPositionsFromPressure = (frame: number[][]) => {
+    if (!frame || !Array.isArray(frame) || frame.length === 0) return;
     
     try {
-      const frame = currentFrame.frame;
       const height = frame.length;
       const width = frame[0].length;
       
@@ -122,6 +147,8 @@ export default function HumanModel({
       // Scan the left side (columns 0 to width/2)
       for (let z = 0; z < height; z++) {
         for (let x = 0; x < Math.floor(width/2); x++) {
+          if (x >= frame[z].length) continue; // Skip if out of bounds
+          
           const pressure = frame[z][x];
           if (pressure > 0) {
             leftFootX += x * pressure;
@@ -138,6 +165,8 @@ export default function HumanModel({
       // Scan the right side (columns width/2 to width)
       for (let z = 0; z < height; z++) {
         for (let x = Math.floor(width/2); x < width; x++) {
+          if (x >= frame[z].length) continue; // Skip if out of bounds
+          
           const pressure = frame[z][x];
           if (pressure > 0) {
             rightFootX += x * pressure;
@@ -208,7 +237,7 @@ export default function HumanModel({
     } catch (error) {
       console.error("Error calculating foot positions:", error);
     }
-  }, [currentFrame, showGhostTrail]);
+  };
   
   // Update trail positions
   const updateTrailPositions = () => {
@@ -261,119 +290,113 @@ export default function HumanModel({
     return new THREE.Euler(rotX, rotY, rotZ);
   };
 
-  // Animation frame update
-  useFrame((state: RootState) => {
+  // Animation frame
+  useFrame((state) => {
     if (!groupRef.current) return;
     
-    // Update position
-    if (position) {
-      groupRef.current.position.set(position[0], position[1], position[2]);
+    // Apply position directly to ensure it matches parent component state
+    groupRef.current.position.set(position[0], position[1], position[2]);
+    
+    // Calculate walk cycle progress only if needed
+    if (isWalking) {
+      walkCycleRef.current += 0.05; // Increment walk cycle continuously
     }
     
-    // Handle real walking animation based on pressure data
-    if (isWalking && !isFalling && currentFrame) {
-      // Use actual data-driven animation if we have valid foot positions
-      const leftLeg = groupRef.current.getObjectByName('leftLeg');
-      const rightLeg = groupRef.current.getObjectByName('rightLeg');
-      const leftArm = groupRef.current.getObjectByName('leftArm');
-      const rightArm = groupRef.current.getObjectByName('rightArm');
+    // Get limb references - use both formats to ensure compatibility
+    const leftLeg = groupRef.current.getObjectByName('left-leg') || 
+                    groupRef.current.getObjectByName('leftLeg');
+    const rightLeg = groupRef.current.getObjectByName('right-leg') || 
+                     groupRef.current.getObjectByName('rightLeg');
+    const leftArm = groupRef.current.getObjectByName('left-arm') || 
+                    groupRef.current.getObjectByName('leftArm');
+    const rightArm = groupRef.current.getObjectByName('right-arm') || 
+                     groupRef.current.getObjectByName('rightArm');
+    
+    // Apply walking animations
+    if (isWalking && animateModel) {
+      // Apply inverse walk cycle to legs (when one is forward, the other is back)
+      if (leftLeg) {
+        leftLeg.rotation.x = Math.sin(walkCycleRef.current) * 0.3;
+      }
+      if (rightLeg) {
+        rightLeg.rotation.x = Math.sin(walkCycleRef.current + Math.PI) * 0.3;
+      }
       
-      if (leftLeg && rightLeg && leftArm && rightArm) {
-        if (stepPhase === 'left') {
-          // Left foot is moving
-          leftLeg.rotation.x = Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * 0.4;
-          rightLeg.rotation.x = -Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * 0.2;
-          // Arms move opposite to legs for natural walking
-          leftArm.rotation.x = -Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * ARM_SWING;
-          rightArm.rotation.x = Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * ARM_SWING * 0.5;
-        } else {
-          // Right foot is moving
-          rightLeg.rotation.x = Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * 0.4;
-          leftLeg.rotation.x = -Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * 0.2;
-          // Arms move opposite to legs
-          rightArm.rotation.x = -Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * ARM_SWING;
-          leftArm.rotation.x = Math.sin(state.clock.elapsedTime * STEP_FREQUENCY) * ARM_SWING * 0.5;
+      // Arms swing opposite to legs
+      if (leftArm) {
+        leftArm.rotation.x = Math.sin(walkCycleRef.current + Math.PI) * 0.2;
+      }
+      if (rightArm) {
+        rightArm.rotation.x = Math.sin(walkCycleRef.current) * 0.2;
+      }
+    }
+    
+    // Apply falling animations based on isFalling state
+    if (isFalling && animateModel) {
+      const fallDirection = getBodyPartColor('fall-direction') === BODY_COLORS.default ? 'backward' : 'forward';
+      
+      // Handle falling in specific direction
+      if (fallDirection === 'backward') {
+        // Apply backward falling rotation to whole model
+        groupRef.current.rotation.x = -Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
+        
+        // Arms extend outward during backward fall
+        if (leftArm) {
+          leftArm.rotation.z = Math.min(fallProgress * 0.7, 0.7);
         }
+        if (rightArm) {
+          rightArm.rotation.z = -Math.min(fallProgress * 0.7, 0.7);
+        }
+      } else if (fallDirection === 'forward') {
+        // Apply forward falling rotation to whole model
+        groupRef.current.rotation.x = Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
+        
+        // Arms extend forward during forward fall
+        if (leftArm) {
+          leftArm.rotation.z = Math.min(fallProgress * 0.4, 0.4);
+        }
+        if (rightArm) {
+          rightArm.rotation.z = -Math.min(fallProgress * 0.4, 0.4);
+        }
+      } else if (fallDirection === 'right') {
+        // Apply rightward falling rotation to whole model
+        groupRef.current.rotation.z = Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
+      } else if (fallDirection === 'left') {
+        // Apply leftward falling rotation to whole model
+        groupRef.current.rotation.z = -Math.min(Math.PI / 2 * fallProgress, Math.PI / 2);
       }
-    } else if (isWalking && !isFalling) {
-      // Fallback to default walking animation if no pressure data
-      walkCycleRef.current += state.clock.elapsedTime * STEP_FREQUENCY;
-      
-      const rightLeg = groupRef.current.getObjectByName('rightLeg');
-      const leftLeg = groupRef.current.getObjectByName('leftLeg');
-      const rightArm = groupRef.current.getObjectByName('rightArm');
-      const leftArm = groupRef.current.getObjectByName('leftArm');
-      
-      if (rightLeg && leftLeg) {
-        rightLeg.rotation.x = Math.sin(walkCycleRef.current) * 0.4;
-        leftLeg.rotation.x = -Math.sin(walkCycleRef.current) * 0.4;
-      }
-      
-      if (rightArm && leftArm) {
-        rightArm.rotation.x = -Math.sin(walkCycleRef.current) * ARM_SWING;
-        leftArm.rotation.x = Math.sin(walkCycleRef.current) * ARM_SWING;
-      }
-    }
-    
-    // Apply fall rotation
-    if (isFalling) {
-      const targetRotation = getModelRotation();
-      groupRef.current.rotation.copy(targetRotation);
-      
-      // If falling, adjust limbs based on direction
-      adjustLimbsForFall(groupRef.current, fallDirection, fallProgress);
+    } else {
+      // Apply neutral standing pose
+      applyNeutralPose();
     }
   });
   
-  // Adjust limbs based on fall direction and progress
-  const adjustLimbsForFall = (
-    group: THREE.Group, 
-    direction: string, 
-    progress: number
-  ) => {
-    const rightArm = group.getObjectByName('rightArm');
-    const leftArm = group.getObjectByName('leftArm');
-    const rightLeg = group.getObjectByName('rightLeg');
-    const leftLeg = group.getObjectByName('leftLeg');
+  // Apply a neutral standing pose
+  const applyNeutralPose = () => {
+    if (!groupRef.current) return;
     
-    if (!rightArm || !leftArm || !rightLeg || !leftLeg) return;
+    // First reset custom rotations from falling
+    groupRef.current.rotation.x = rotation[0];
+    groupRef.current.rotation.y = rotation[1];
+    groupRef.current.rotation.z = rotation[2];
     
-    switch (direction) {
-      case 'forward':
-        // Arms extend forward during fall
-        rightArm.rotation.x = -Math.PI/3 * progress;
-        leftArm.rotation.x = -Math.PI/3 * progress;
-        // Legs bend slightly
-        rightLeg.rotation.x = Math.PI/6 * progress;
-        leftLeg.rotation.x = Math.PI/6 * progress;
-        break;
-        
-      case 'backward':
-        // Arms go up and back
-        rightArm.rotation.x = Math.PI/2 * progress;
-        leftArm.rotation.x = Math.PI/2 * progress;
-        // Legs bend forward
-        rightLeg.rotation.x = -Math.PI/4 * progress;
-        leftLeg.rotation.x = -Math.PI/4 * progress;
-        break;
-        
-      case 'left':
-        // Arms go out to the side
-        rightArm.rotation.z = -Math.PI/4 * progress;
-        leftArm.rotation.z = -Math.PI/2 * progress;
-        // Legs bend slightly
-        rightLeg.rotation.z = -Math.PI/6 * progress;
-        leftLeg.rotation.z = -Math.PI/3 * progress;
-        break;
-        
-      case 'right':
-        // Arms go out to the side
-        rightArm.rotation.z = Math.PI/2 * progress;
-        leftArm.rotation.z = Math.PI/4 * progress;
-        // Legs bend slightly
-        rightLeg.rotation.z = Math.PI/3 * progress;
-        leftLeg.rotation.z = Math.PI/6 * progress;
-        break;
+    // Reset limbs to natural position if not walking
+    if (!isWalking) {
+      // Get limb references - check both naming formats
+      const leftLeg = groupRef.current.getObjectByName('left-leg') || 
+                      groupRef.current.getObjectByName('leftLeg');
+      const rightLeg = groupRef.current.getObjectByName('right-leg') || 
+                       groupRef.current.getObjectByName('rightLeg');
+      const leftArm = groupRef.current.getObjectByName('left-arm') || 
+                      groupRef.current.getObjectByName('leftArm');
+      const rightArm = groupRef.current.getObjectByName('right-arm') || 
+                       groupRef.current.getObjectByName('rightArm');
+      
+      // Gradually reset to neutral position
+      if (leftLeg) leftLeg.rotation.x = 0;
+      if (rightLeg) rightLeg.rotation.x = 0;
+      if (leftArm) leftArm.rotation.x = 0;
+      if (rightArm) rightArm.rotation.x = 0;
     }
   };
 

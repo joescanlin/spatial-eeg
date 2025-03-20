@@ -64,14 +64,28 @@ export default function TestControls() {
   // Generate a simulated fall event
   const generateFallEvent = (type: 'forward' | 'backward' | 'left' | 'right') => {
     try {
+      console.log(`Generating ${type} fall simulation...`);
+      
       // Generate a simulated fall event using the service
       const generatedEvent = fallEventCapture.simulateFallEvent(type);
+      
+      // Add debugging
+      console.log("Generated fall event:", generatedEvent);
+      console.log("Frame count:", generatedEvent?.frames?.length || 0);
+      
+      // Verify the event has frames before showing modal
+      if (!generatedEvent || !generatedEvent.frames || generatedEvent.frames.length === 0) {
+        console.error("Generated fall event is missing frames!");
+        alert("Error generating fall event. See console for details.");
+        return;
+      }
       
       // Set as current fall event and show modal
       setCurrentFallEvent(generatedEvent);
       setShowModal(true);
     } catch (error) {
       console.error('Error generating fall event:', error);
+      alert(`Error generating fall event: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -163,7 +177,7 @@ export default function TestControls() {
             className="bg-red-700 hover:bg-red-600 text-white py-1 px-2 rounded text-sm"
             onClick={() => generateFallEvent('backward')}
           >
-            Backward Fall
+            Demo Backward Fall
           </button>
           <button 
             className="bg-red-700 hover:bg-red-600 text-white py-1 px-2 rounded text-sm"

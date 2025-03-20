@@ -20,7 +20,7 @@ export interface FallEventFrame {
 }
 
 export interface FallTrajectory {
-  direction: string; // forward, backward, left, right
+  direction: 'forward' | 'backward' | 'left' | 'right' | 'none' | string; // Properly typed directions
   startPoint: [number, number, number];
   endPoint: [number, number, number];
   impactPoints: [number, number, number][];
@@ -206,6 +206,15 @@ class FallEventCaptureService {
   // Simulate a fall event for testing (useful when real data is unavailable)
   simulateFallEvent(type: 'forward' | 'backward' | 'left' | 'right' = 'forward'): FallEvent {
     try {
+      console.log(`Starting simulation for ${type} fall...`);
+      
+      // For backward falls, use our specialized realistic simulation
+      if (type === 'backward') {
+        const result = this.simulateRealisticBackwardFall();
+        console.log(`Backward fall simulation completed with ${result.frames.length} frames`);
+        return result;
+      }
+      
       // Create a test fall event
       const fallEventId = `test-fall-${Date.now()}`;
       const timestamp = new Date().toISOString();
@@ -227,7 +236,7 @@ class FallEventCaptureService {
       for (let i = 0; i < 30; i++) {
         const fallProbability = i > 15 ? 0.9 : i / 15;
         frames.push({
-          frame: [...baseFrame],
+          frame: [...baseFrame.map(row => [...row])], // Deep copy to avoid reference issues
           timestamp: new Date(Date.now() - (30 - i) * 100).toISOString(),
           fallProbability
         });
@@ -248,62 +257,457 @@ class FallEventCaptureService {
           bodyParts.push(
             { name: 'back', position: [0, 0.8, 0.5] },
             { name: 'head', position: [0, 1.2, 0.7] },
-            { name: 'hips', position: [0, 0.4, 0.3] }
+            { name: 'hands', position: [0, 0.5, 0.4] }
           );
           break;
         case 'left':
           bodyParts.push(
-            { name: 'left shoulder', position: [-0.5, 1.0, 0] },
-            { name: 'left hip', position: [-0.3, 0.5, 0] },
+            { name: 'left hip', position: [-0.5, 0.8, 0] },
+            { name: 'left elbow', position: [-0.6, 1.0, 0] },
             { name: 'head', position: [-0.7, 1.2, 0] }
           );
           break;
         case 'right':
           bodyParts.push(
-            { name: 'right shoulder', position: [0.5, 1.0, 0] },
-            { name: 'right hip', position: [0.3, 0.5, 0] },
+            { name: 'right hip', position: [0.5, 0.8, 0] },
+            { name: 'right elbow', position: [0.6, 1.0, 0] },
             { name: 'head', position: [0.7, 1.2, 0] }
           );
           break;
       }
       
-      // Create test fall event
+      // Create fall event object
       const fallEvent: FallEvent = {
         id: fallEventId,
         timestamp,
         frames,
         fallDetected: true,
-        fallProbability: 0.9,
+        fallProbability: 0.95,
         analysis: {
-          type: type === 'forward' ? 'trip' : 
-                type === 'backward' ? 'slip' : 'sideway fall',
+          type: `${type} fall`,
           bodyImpactSequence: bodyParts,
           trajectory: {
             direction: type,
             startPoint: [0, 0, 0],
-            endPoint: type === 'forward' ? [0, 0, -1] : 
-                      type === 'backward' ? [0, 0, 1] :
-                      type === 'left' ? [-1, 0, 0] : [1, 0, 0],
-            impactPoints: bodyParts.map(part => part.position),
-            velocity: 2.5
+            endPoint: calculateEndPoint(type),
+            impactPoints: [[0, 0, 0]],
+            velocity: 1.5
           },
           balanceMetrics: {
-            preFailStabilityScore: 0.4,
+            preFailStabilityScore: 0.7,
             asymmetryIndex: 0.3
           }
         }
       };
       
-      // Add to history
+      // Add to fall events history
       this.fallEvents.push(fallEvent);
       
-      console.log("Simulated fall event created:", fallEvent);
+      console.log(`Standard fall event created with ${fallEvent.frames.length} frames`);
       
       return fallEvent;
     } catch (error) {
       console.error("Error simulating fall event:", error);
-      return { ...EMPTY_FALL_EVENT };
+      return EMPTY_FALL_EVENT;
     }
+  }
+  
+  /**
+   * Simulates a realistic backward fall with perfect sequence of frames
+   * The simulation starts from one end of the sensor array and shows:
+   * 1. Walking phase: 3 steps from the edge of the sensor grid
+   * 2. Transition: Stumble/slip causing loss of balance
+   * 3. Fall: Realistic backward fall with proper impact sequence (hip→back→head)
+   * 4. Final position: Stable pressure pattern of person on the ground
+   */
+  simulateRealisticBackwardFall(): FallEvent {
+    try {
+      console.log("Starting realistic backward fall simulation...");
+      
+      const fallEventId = `realistic-backward-fall-${Date.now()}`;
+      const timestamp = new Date().toISOString();
+      const totalFrames = 45; // Total sequence length
+      const frames: FallEventFrame[] = [];
+      
+      // Grid dimensions (15x12)
+      const GRID_HEIGHT = 15;
+      const GRID_WIDTH = 12;
+      
+      // Create empty frame template
+      const createEmptyFrame = () => {
+        return Array(GRID_HEIGHT).fill(0).map(() => Array(GRID_WIDTH).fill(0));
+      };
+      
+      // Function to add foot pressure pattern at a specific position
+      const addFootPressure = (frame: number[][], x: number, y: number, intensity: number = 1.0, isRightFoot: boolean = true) => {
+        // Ensure coordinates are within grid bounds
+        if (x < 0 || x >= GRID_WIDTH || y < 0 || y >= GRID_HEIGHT) return frame;
+        
+        // Enhanced foot shape (more realistic foot pattern)
+        const footShape = isRightFoot ?
+          [[0, 0, 0.7], [1, 0, 0.8], [0, 1, 0.9], [1, 1, 1.0], [0, 2, 0.4], [1, 2, 0.5]] :  // Right foot
+          [[0, 0, 0.7], [1, 0, 0.9], [0, 1, 0.8], [1, 1, 1.0], [0, 2, 0.5], [1, 2, 0.4]];   // Left foot
+        
+        // Apply foot shape to the frame
+        for (const [dx, dy, factor] of footShape) {
+          const posX = x + dx;
+          const posY = y + dy;
+          if (posX >= 0 && posX < GRID_WIDTH && posY >= 0 && posY < GRID_HEIGHT) {
+            frame[posY][posX] = intensity * factor;
+          }
+        }
+        
+        return frame;
+      };
+      
+      // Function to add body part pressure (for fall impact)
+      const addBodyPressure = (frame: number[][], centerX: number, centerY: number, radiusX: number, radiusY: number, intensity: number = 1.0) => {
+        for (let y = Math.max(0, centerY - radiusY); y <= Math.min(GRID_HEIGHT - 1, centerY + radiusY); y++) {
+          for (let x = Math.max(0, centerX - radiusX); x <= Math.min(GRID_WIDTH - 1, centerX + radiusX); x++) {
+            // Calculate distance from center (normalized ellipse equation)
+            const distanceSquared = Math.pow((x - centerX) / radiusX, 2) + Math.pow((y - centerY) / radiusY, 2);
+            
+            // Apply pressure based on distance from center (more pressure in center, less at edges)
+            if (distanceSquared <= 1) {
+              const pressureFactor = 1 - Math.sqrt(distanceSquared) * 0.7; // Pressure decreases toward edges
+              frame[y][x] = Math.max(frame[y][x], intensity * pressureFactor);
+            }
+          }
+        }
+        
+        return frame;
+      };
+      
+      console.log("Generating walking phase frames...");
+      
+      // ----- WALKING PHASE (Frames 0-8) -----
+      // Start position at one of the long ends (row 14, near bottom of 15x12 grid)
+      
+      // Frame 0-2: Standing position with both feet
+      for (let i = 0; i < 3; i++) {
+        let frame = createEmptyFrame();
+        // Starting position at the bottom of grid - both feet
+        frame = addFootPressure(frame, 5, 13, 0.9, true);  // Right foot
+        frame = addFootPressure(frame, 7, 13, 0.9, false); // Left foot
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.05
+        });
+      }
+      
+      // Frame 3-5: First step forward with right foot
+      for (let i = 3; i < 6; i++) {
+        let frame = createEmptyFrame();
+        frame = addFootPressure(frame, 7, 13, 0.9 - (i-3)*0.1, false); // Left foot stationary, gradually lightening
+        frame = addFootPressure(frame, 5, 10, 0.7 + (i-3)*0.1, true);  // Right foot moving forward, gradually increasing pressure
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.07
+        });
+      }
+      
+      // Frame 6-8: Second step forward with left foot
+      for (let i = 6; i < 9; i++) {
+        let frame = createEmptyFrame();
+        // Gradual transition: right foot gradually lifts, left foot gradually lands
+        const rightPressure = Math.max(0, 0.9 - (i-6)*0.3);  // Decreasing
+        const leftPressure = Math.min(0.9, 0.6 + (i-6)*0.15); // Increasing
+        
+        if (rightPressure > 0) {
+          frame = addFootPressure(frame, 5, 10, rightPressure, true);  // Right foot stationary but lifting
+        }
+        frame = addFootPressure(frame, 7, 7, leftPressure, false);  // Left foot more forward
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.1
+        });
+      }
+      
+      console.log("Generating transition phase frames...");
+      
+      // ----- TRANSITION PHASE (Frames 9-12) -----
+      // Frame 9-10: Weight shifting backward, beginning to lose balance
+      for (let i = 9; i < 11; i++) {
+        let frame = createEmptyFrame();
+        frame = addFootPressure(frame, 5, 10, 0.8, true);   // Right foot, less pressure on toes
+        frame = addFootPressure(frame, 7, 7, 0.8, false);   // Left foot, less pressure on toes
+        
+        // Add more heel pressure (more weight on heels as balance shifts backward)
+        frame[11][5] = 1.0; // Right heel - more pronounced
+        frame[8][7] = 1.0;  // Left heel - more pronounced
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.2 + (i - 9) * 0.2
+        });
+      }
+      
+      // Frame 11-12: Stumbling backward, losing balance completely
+      for (let i = 11; i < 13; i++) {
+        let frame = createEmptyFrame();
+        
+        // Add fading foot pressure and increasing heel pressure as person stumbles
+        if (i === 11) {
+          // Unstable foot pressure as balance is lost
+          frame = addFootPressure(frame, 5, 10, 0.5, true);   // Right foot, unstable
+          frame = addFootPressure(frame, 7, 7, 0.4, false);   // Left foot, lifting
+          frame[11][5] = 0.9; // Right heel pressure - strong
+          frame[8][7] = 0.8;  // Left heel pressure - strong
+        } else {
+          // Nearly no toe pressure, mostly heel pressure as fall begins
+          frame = addFootPressure(frame, 5, 10, 0.2, true);   // Right foot, barely touching
+          frame = addFootPressure(frame, 7, 7, 0.2, false);   // Left foot, barely touching
+          frame[11][5] = 0.7; // Right heel pressure - decreasing as falling
+          frame[8][7] = 0.6;  // Left heel pressure - decreasing as falling
+        }
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.4 + (i - 11) * 0.3
+        });
+      }
+      
+      console.log("Generating impact phase frames...");
+      
+      // ----- IMPACT SEQUENCE (Frames 13-25) -----
+      // Frame 13-15: Hip/Buttocks impact
+      for (let i = 13; i < 16; i++) {
+        let frame = createEmptyFrame();
+        
+        // Hip/buttocks impact (centered around row 9, more pronounced)
+        frame = addBodyPressure(frame, 6, 9, 1.5, 1, 0.9 + (i - 13) * 0.05);
+        
+        // Feet still slightly touching ground
+        if (i === 13) {
+          frame[11][5] = 0.3; // Right heel fading touch
+          frame[8][7] = 0.3;  // Left heel fading touch
+        }
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.7 + (i - 13) * 0.1
+        });
+      }
+      
+      // Frame 16-19: Lower back impact
+      for (let i = 16; i < 20; i++) {
+        let frame = createEmptyFrame();
+        
+        // Hip/buttocks impact remains
+        frame = addBodyPressure(frame, 6, 9, 1.5, 1, 1.0);
+        
+        // Lower back impact (centered around row 7, more centered on grid)
+        frame = addBodyPressure(frame, 6, 7, 2, 1.5, 0.8 + (i - 16) * 0.07);
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.9
+        });
+      }
+      
+      // Frame 20-22: Upper back/shoulders impact
+      for (let i = 20; i < 23; i++) {
+        let frame = createEmptyFrame();
+        
+        // Previous impacts remain
+        frame = addBodyPressure(frame, 6, 9, 1.5, 1, 1.0);     // Hip/buttocks
+        frame = addBodyPressure(frame, 6, 7, 2, 1.5, 1.0);     // Lower back
+        
+        // Upper back impact (centered around row 5, more centered)
+        frame = addBodyPressure(frame, 6, 5, 2.5, 1.5, 0.8 + (i - 20) * 0.07);
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.95
+        });
+      }
+      
+      // Frame 23-25: Head contact
+      for (let i = 23; i < 26; i++) {
+        let frame = createEmptyFrame();
+        
+        // Previous impacts remain
+        frame = addBodyPressure(frame, 6, 9, 1.5, 1, 1.0);   // Hip/buttocks
+        frame = addBodyPressure(frame, 6, 7, 2, 1.5, 1.0);   // Lower back
+        frame = addBodyPressure(frame, 6, 5, 2.5, 1.5, 1.0); // Upper back
+        
+        // Head impact (centered around row 3, more centered and pronounced)
+        frame = addBodyPressure(frame, 6, 3, 1, 1, 0.8 + (i - 23) * 0.07);
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.97
+        });
+      }
+      
+      console.log("Generating final position frames...");
+      
+      // ----- FINAL POSITION (Frames 26-45) -----
+      // Frame 26-45: Final stable position with subtle variations
+      for (let i = 26; i < totalFrames; i++) {
+        let frame = createEmptyFrame();
+        
+        // Complete body contact pattern
+        frame = addBodyPressure(frame, 6, 9, 1.5, 1, 1.0);   // Hip/buttocks
+        frame = addBodyPressure(frame, 6, 7, 2, 1.5, 1.0);    // Lower back
+        frame = addBodyPressure(frame, 6, 5, 2.5, 1.5, 1.0);  // Upper back
+        frame = addBodyPressure(frame, 6, 3, 1, 1, 0.9);      // Head
+        
+        // Add subtle variations to simulate breathing or small movements
+        const variationFactor = Math.sin(i * 0.4) * 0.05 + 0.95;
+        for (let y = 0; y < GRID_HEIGHT; y++) {
+          for (let x = 0; x < GRID_WIDTH; x++) {
+            if (frame[y][x] > 0) {
+              frame[y][x] *= variationFactor;
+            }
+          }
+        }
+        
+        frames.push({
+          frame,
+          timestamp: new Date(Date.now() - (totalFrames - i) * 100).toISOString(),
+          fallProbability: 0.99
+        });
+      }
+      
+      // Define impact sequence with precise positions and timing
+      const bodyImpactSequence: BodyPart[] = [
+        { name: "hip", position: [6, 0.3, 9], impact: 0.9 },
+        { name: "lower back", position: [6, 0.4, 7], impact: 0.8 },
+        { name: "upper back", position: [6, 0.5, 5], impact: 0.7 },
+        { name: "head", position: [6, 0.7, 3], impact: 0.6 }
+      ];
+      
+      console.log(`Created ${frames.length} frames for backward fall simulation`);
+      
+      // Create fall event with complete analysis
+      const fallEvent: FallEvent = {
+        id: fallEventId,
+        timestamp,
+        frames,
+        fallDetected: true,
+        fallProbability: 0.95,
+        analysis: {
+          type: 'backward fall',
+          bodyImpactSequence,
+          trajectory: {
+            direction: 'backward',
+            startPoint: [6, 0, 13],  // Start at the bottom of grid
+            endPoint: [6, 0, 3],     // End at the top where head impacts
+            impactPoints: [
+              [6, 0, 9],   // Hip impact
+              [6, 0, 7],   // Lower back impact
+              [6, 0, 5],   // Upper back impact
+              [6, 0, 3]    // Head impact
+            ],
+            velocity: 1.2 // Moderate fall velocity
+          },
+          balanceMetrics: {
+            preFailStabilityScore: 0.7,
+            asymmetryIndex: 0.3
+          }
+        }
+      };
+      
+      // Verify frames were created properly
+      if (!frames.length) {
+        console.error("No frames were created for backward fall simulation!");
+        throw new Error("Failed to generate fall frames");
+      }
+      
+      // Add to fall events history
+      this.fallEvents.push(fallEvent);
+      
+      console.log(`Realistic backward fall event created with ${fallEvent.frames.length} frames`);
+      
+      return fallEvent;
+    } catch (error) {
+      console.error("Error in backward fall simulation:", error);
+      
+      // Create simple fallback in case of error
+      const simpleEvent = this.createSimpleFallbackEvent('backward');
+      this.fallEvents.push(simpleEvent);
+      
+      return simpleEvent;
+    }
+  }
+  
+  /**
+   * Create a simple fallback event in case the detailed simulation fails
+   */
+  private createSimpleFallbackEvent(type: 'forward' | 'backward' | 'left' | 'right'): FallEvent {
+    console.log("Creating simple fallback event for", type);
+    
+    const fallEventId = `fallback-${type}-fall-${Date.now()}`;
+    const timestamp = new Date().toISOString();
+    
+    // Create simple frames with basic data
+    const frames: FallEventFrame[] = [];
+    const baseFrame = Array(15).fill(0).map(() => Array(12).fill(0));
+    
+    // Add some random data to frame
+    for (let i = 0; i < 15; i++) {
+      for (let j = 0; j < 12; j++) {
+        if (Math.random() < 0.2) {
+          baseFrame[i][j] = Math.random() * 0.8;
+        }
+      }
+    }
+    
+    // Create 30 simple frames
+    for (let i = 0; i < 30; i++) {
+      const frameCopy = baseFrame.map(row => [...row]);
+      frames.push({
+        frame: frameCopy,
+        timestamp: new Date(Date.now() - (30 - i) * 100).toISOString(),
+        fallProbability: i > 15 ? 0.9 : i / 15
+      });
+    }
+    
+    // Create body parts
+    const bodyParts: BodyPart[] = [];
+    if (type === 'backward') {
+      bodyParts.push(
+        { name: 'back', position: [0, 0.8, 0.5], impact: 0.9 },
+        { name: 'head', position: [0, 1.2, 0.7], impact: 0.8 },
+        { name: 'hands', position: [0, 0.5, 0.4], impact: 0.7 }
+      );
+    }
+    
+    return {
+      id: fallEventId,
+      timestamp,
+      frames,
+      fallDetected: true,
+      fallProbability: 0.95,
+      analysis: {
+        type: `${type} fall`,
+        bodyImpactSequence: bodyParts,
+        trajectory: {
+          direction: type,
+          startPoint: [0, 0, 0],
+          endPoint: calculateEndPoint(type),
+          impactPoints: [[0, 0, 0]],
+          velocity: 1.5
+        },
+        balanceMetrics: {
+          preFailStabilityScore: 0.7,
+          asymmetryIndex: 0.3
+        }
+      }
+    };
   }
   
   // Get all fall events
@@ -819,3 +1223,14 @@ class FallEventCaptureService {
 
 // Export singleton instance
 export const fallEventCapture = new FallEventCaptureService(); 
+
+// Helper function to calculate endpoint based on direction
+function calculateEndPoint(direction: string): [number, number, number] {
+  switch(direction) {
+    case 'forward': return [0, 0, -1];
+    case 'backward': return [0, 0, 1];
+    case 'left': return [-1, 0, 0];
+    case 'right': return [1, 0, 0];
+    default: return [0, 0, 0];
+  }
+} 

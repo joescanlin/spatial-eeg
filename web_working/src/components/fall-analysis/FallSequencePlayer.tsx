@@ -62,22 +62,34 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
         return hasPressureData(frame.frame);
       });
       
-      // Find approximate start of fall based on probability
-      const fallStartIndex = fallEvent.frames.findIndex(frame => 
-        frame.fallProbability > 0.3
-      );
+      // Special handling for our realistic backward fall simulation
+      const isRealisticBackwardFall = fallEvent.id?.includes('realistic-backward-fall');
       
-      // Find impact frame (highest pressure)
-      let maxPressure = 0;
-      let impactIndex = 0;
+      let fallStartIndex, impactIndex;
       
-      fallEvent.frames.forEach((frame, index) => {
-        const pressure = calculateTotalPressure(frame.frame);
-        if (pressure > maxPressure) {
-          maxPressure = pressure;
-          impactIndex = index;
-        }
-      });
+      if (isRealisticBackwardFall) {
+        // For our realistic simulation, we know exactly where key moments are
+        fallStartIndex = 9;  // Frame 9 is where balance loss begins
+        impactIndex = 13;    // Frame 13 is where hip impact begins
+      } else {
+        // For other sequences, detect based on data
+        // Find approximate start of fall based on probability
+        fallStartIndex = fallEvent.frames.findIndex(frame => 
+          frame.fallProbability > 0.3
+        );
+        
+        // Find impact frame (highest pressure)
+        let maxPressure = 0;
+        impactIndex = 0;
+        
+        fallEvent.frames.forEach((frame, index) => {
+          const pressure = calculateTotalPressure(frame.frame);
+          if (pressure > maxPressure) {
+            maxPressure = pressure;
+            impactIndex = index;
+          }
+        });
+      }
       
       setKeyFrameIndices({
         walkStart: walkStartIndex >= 0 ? walkStartIndex : 0,
@@ -122,7 +134,16 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
       if (!fallEvent || !fallEvent.frames.length) return;
       
       setTotalFrames(fallEvent.frames.length);
+      // Ensure frameBuffer is populated immediately and completely
       frameBufferRef.current = [...fallEvent.frames];
+      console.log(`Frame buffer populated with ${frameBufferRef.current.length} frames`);
+      
+      // Verify all frames are correctly loaded
+      if (frameBufferRef.current.length !== fallEvent.frames.length) {
+        console.error(`Frame buffer mismatch: ${frameBufferRef.current.length} vs ${fallEvent.frames.length}`);
+        // Force a re-copy to ensure all frames are available
+        frameBufferRef.current = [...fallEvent.frames];
+      }
       
       // Register for playback updates
       const unregister = fallEventCapture.registerPlaybackCallback((frame) => {
@@ -146,15 +167,6 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
         }
       });
       
-      // Show the first frame by default
-      if (fallEvent.frames.length > 0) {
-        setCurrentFrame(fallEvent.frames[0]);
-        setTimestamp(new Date(fallEvent.frames[0].timestamp).toLocaleTimeString());
-        if (onFrameChange) {
-          onFrameChange(fallEvent.frames[0]);
-        }
-      }
-      
       // Clean up on unmount
       return () => {
         try {
@@ -166,6 +178,29 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
       };
     } catch (error) {
       console.error("Error setting up playback:", error);
+    }
+  }, [fallEvent, onFrameChange]);
+  
+  // Initialize with the first frame
+  useEffect(() => {
+    try {
+      // Show the first frame by default when component mounts or fallEvent changes
+      if (fallEvent?.frames?.length > 0) {
+        const firstFrame = fallEvent.frames[0];
+        console.log("Initializing with first frame");
+        
+        // Update local state
+        setCurrentFrame(firstFrame);
+        setCurrentFrameIndex(0);
+        setTimestamp(new Date(firstFrame.timestamp).toLocaleTimeString());
+        
+        // Notify parent
+        if (onFrameChange) {
+          onFrameChange(firstFrame);
+        }
+      }
+    } catch (error) {
+      console.error("Error initializing first frame:", error);
     }
   }, [fallEvent, onFrameChange]);
   
@@ -236,22 +271,45 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
   // Handle timeline slider change
   const handleTimelineChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
+      if (!frameBufferRef.current || frameBufferRef.current.length === 0) {
+        console.error("Frame buffer not initialized");
+        return;
+      }
+      
       const index = parseInt(e.target.value, 10);
+      
+      // Validate index is within bounds
+      if (index < 0 || index >= frameBufferRef.current.length) {
+        console.warn(`Timeline index out of bounds: ${index} (max: ${frameBufferRef.current.length - 1})`);
+        return;
+      }
+      
+      // Update current index immediately for UI responsiveness
       setCurrentFrameIndex(index);
       
-      // Immediately update the frame for responsive scrubbing
-      if (frameBufferRef.current && frameBufferRef.current.length > index) {
-        const frame = frameBufferRef.current[index];
-        setCurrentFrame(frame);
-        setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
-        
-        // Call parent callback for immediate visual update
-        if (onFrameChange) {
-          onFrameChange(frame);
-        }
+      // Get the frame at this index
+      const frame = frameBufferRef.current[index];
+      if (!frame) {
+        console.error(`No frame at index ${index}`);
+        return;
+      }
+      
+      // Update UI state for immediate feedback
+      setCurrentFrame(frame);
+      setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
+      
+      // Call parent callback for immediate visual update
+      if (onFrameChange) {
+        console.log(`Timeline change: updating to frame ${index}`);
+        onFrameChange(frame);
+      }
+      
+      // If we're playing, pause to allow manual scrubbing
+      if (playbackStatus === 'playing') {
+        fallEventCapture.pausePlayback();
       }
     } catch (error) {
-      console.error("Error changing timeline:", error);
+      console.error("Error handling timeline change:", error);
     }
   };
   
@@ -267,7 +325,36 @@ const FallSequencePlayer: React.FC<FallSequencePlayerProps> = ({
   const handleTimelineMouseUp = () => {
     if (isDragging) {
       setIsDragging(false);
-      fallEventCapture.seekToFrame(currentFrameIndex, fallEvent.id);
+      console.log(`Timeline scrub complete: seeking to frame ${currentFrameIndex}`);
+      
+      try {
+        // Validate currentFrameIndex is within bounds before seeking
+        if (currentFrameIndex < 0 || currentFrameIndex >= fallEvent.frames.length) {
+          console.error(`Invalid frame index: ${currentFrameIndex}, max: ${fallEvent.frames.length - 1}`);
+          return;
+        }
+        
+        // Get the current frame to ensure we're passing the correct data
+        const frame = frameBufferRef.current[currentFrameIndex];
+        if (!frame) {
+          console.error(`No frame found at index ${currentFrameIndex}`);
+          return;
+        }
+        
+        // Update the global playback state
+        fallEventCapture.seekToFrame(currentFrameIndex, fallEvent.id);
+        
+        // Ensure our local state is also updated 
+        setCurrentFrame(frame);
+        setTimestamp(new Date(frame.timestamp).toLocaleTimeString());
+        
+        // Update the parent component to ensure visuals update immediately
+        if (onFrameChange) {
+          onFrameChange(frame);
+        }
+      } catch (error) {
+        console.error("Error completing timeline scrub:", error);
+      }
     }
   };
   
