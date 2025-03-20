@@ -176,11 +176,11 @@ export function GridDisplay({ data }: GridDisplayProps) {
         </div>
       )}
       
-      {/* Debug button - remove in production */}
-      <div className="absolute bottom-2 left-2 z-10">
+      {/* Open Analysis Button - Positioned at top-left corner */}
+      <div className="absolute top-0 left-0 z-20 m-2">
         <button
           onClick={handleOpenAnalysis}
-          className="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-2 rounded"
+          className="bg-blue-700 hover:bg-blue-600 text-white text-xs font-semibold py-1.5 px-3 rounded shadow-md"
         >
           Open Analysis
         </button>

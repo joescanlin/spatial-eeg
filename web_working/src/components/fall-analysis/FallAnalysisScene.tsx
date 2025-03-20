@@ -169,11 +169,11 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
   const getCameraPosition = () => {
     switch (viewMode) {
       case 'top':
-        return [0, 5, 0] as [number, number, number]; // Top-down view, closer
+        return [0, 2.5, 0] as [number, number, number]; // Closer top-down view
       case 'side': 
-        return [5, 1.5, 0] as [number, number, number]; // Side view, closer
+        return [2.5, 0.8, 0] as [number, number, number]; // Closer side view
       default:
-        return [2.5, 2, 2.5] as [number, number, number]; // Isometric view - much closer to the grid
+        return [1.2, 1, 1.2] as [number, number, number]; // Very close isometric view
     }
   };
   
@@ -541,7 +541,9 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
           ref={canvasRef}
           camera={{ 
             position: getCameraPosition(), 
-            fov: 35
+            fov: 30, // Narrower field of view for more zoom
+            near: 0.1,
+            far: 50
           }}
           shadows
           className="w-full h-full"
@@ -666,8 +668,8 @@ export default function FallAnalysisScene({ fallEvent, showStats = false }: Fall
           <OrbitControls 
             target={[0, 0, 0]} 
             maxPolarAngle={Math.PI / 2 - 0.1}
-            minDistance={1.5}
-            maxDistance={10} 
+            minDistance={0.8} // Limit how close we can zoom
+            maxDistance={5}  // Limit how far we can zoom out
           />
           
           {/* Stats (if enabled) */}

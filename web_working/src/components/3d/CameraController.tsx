@@ -9,14 +9,14 @@ interface CameraControllerProps {
 }
 
 // Camera position constants
-const TOP_DOWN_POSITION = new THREE.Vector3(0, 15, 0);
+const TOP_DOWN_POSITION = new THREE.Vector3(0, 4, 0);
 const TOP_DOWN_TARGET = new THREE.Vector3(0, 0, 0);
 
-const ISOMETRIC_POSITION = new THREE.Vector3(8, 8, 8);
+const ISOMETRIC_POSITION = new THREE.Vector3(1.5, 1.5, 1.5);
 const ISOMETRIC_TARGET = new THREE.Vector3(0, 0, 0);
 
-const FOLLOW_HEIGHT = 6;
-const FOLLOW_DISTANCE = 6;
+const FOLLOW_HEIGHT = 2.5;
+const FOLLOW_DISTANCE = 2.5;
 
 export default function CameraController({ view, fallDetected }: CameraControllerProps) {
   // Get the camera and scene from Three.js context
