@@ -1,0 +1,24 @@
+mqtt:
+  broker: 169.254.100.100
+  port: 1883
+  raw_data_topic: sensors/floor/raw
+  alerts_topic: falls/alerts
+
+detector:
+  frame_history_size: 30  # 3 seconds at 10Hz
+  min_impact_area: 12     # Minimum ~2x2 feet (6x6 sensors)
+  max_impact_area: 48     # Maximum ~3x3 feet (9x9 sensors)
+  velocity_threshold: 1.5  # Adjusted for 4" grid
+  stability_frames: 5      # 500ms at 10Hz
+  confidence_threshold: 0.7
+
+simulator:
+  room_width_feet: 12
+  room_length_feet: 12
+  sample_rate_hz: 10
+  sensor_resolution_inches: 4
+
+visualization:
+  enabled: true
+  show_grid: true
+  show_timestamp: true

@@ -1,0 +1,16 @@
+Working Network Configuration (2024-01-23):
+
+Interface: en10
+Link-local IP: 169.254.41.115
+Device IP: 169.254.100.100
+Device MAC: d8:3a:dd:6f:44:a5
+
+Route Configuration:
+- All 169.254.x.x traffic routed through en10
+- Device accessible at http://169.254.100.100:5000/mat/rft/display
+
+To restore this configuration:
+1. Clear DNS servers
+2. Set manual IP on en10: 169.254.41.115/16
+3. Add route for 169.254.100.100 through en10
+4. Verify device connectivity with ping 

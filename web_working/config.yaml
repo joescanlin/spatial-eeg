@@ -1,0 +1,28 @@
+mqtt:
+  broker: 169.254.100.100
+  port: 1883
+  raw_data_topic: sensors/floor/raw
+  alerts_topic: falls/alerts
+  frame_data_topic: controller/networkx/frame/rft
+  active_path_topic: analysis/path/rft/active
+  complete_path_topic: analysis/path/rft/complete
+
+detector:
+  frame_history_size: 30  # 3 seconds at 10Hz
+  min_impact_area: 12     # Minimum ~2x2 feet (6x6 sensors)
+  max_impact_area: 48     # Maximum ~3x3 feet (9x9 sensors)
+  velocity_threshold: 1.5  # Adjusted for 4" grid
+  stability_frames: 5      # 500ms at 10Hz
+  confidence_threshold: 0.85
+  sequence_length: 10     # For ML model
+  fall_threshold: 0.8     # Probability threshold for fall detection
+  consecutive_frames: 3    # Number of consecutive frames needed for fall detection
+  cooldown_period: 10     # Cooldown period in seconds after a fall alert
+
+visualization:
+  enabled: true
+  show_grid: true
+  show_timestamp: true
+  grid_width: 12
+  grid_height: 15
+  pixel_resolution_inches: 4

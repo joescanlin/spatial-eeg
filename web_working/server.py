@@ -1,0 +1,1169 @@
+from flask import Flask, Response, jsonify, request
+from flask_cors import CORS
+import json
+import paho.mqtt.client as mqtt
+from datetime import datetime
+import queue
+import threading
+import logging
+import os
+from dotenv import load_dotenv
+import numpy as np
+import time
+from fall_detection.fall_detector import FallDetector
+from collections import deque
+import yaml
+import requests  # Add requests for Mobile Text Alerts API
+import traceback
+import random
+import logging.handlers
+
+# Create logs directory if it doesn't exist
+os.makedirs('logs', exist_ok=True)
+
+# Configure logging with rotation
+formatter = logging.Formatter(
+    '[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
+    '%Y-%m-%d %H:%M:%S'
+)
+
+# Setup file handler with rotation
+file_handler = logging.handlers.RotatingFileHandler(
+    'logs/server.log',
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+file_handler.setFormatter(formatter)
+file_handler.setLevel(logging.DEBUG)
+
+# Setup console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+console_handler.setLevel(logging.INFO)
+
+# Setup root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Load environment variables
+load_dotenv()
+
+# Load configuration
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+app = Flask(__name__)
+
+# Configure CORS properly
+CORS(app, 
+     resources={
+         r"/*": {  # Apply to all routes
+             "origins": ["http://localhost:5173", "http://localhost:3000"],
+             "allow_headers": ["Content-Type", "Authorization", "Accept"],
+             "expose_headers": ["Content-Type", "Authorization"],
+             "methods": ["GET", "POST", "OPTIONS"],
+             "supports_credentials": True,
+             "max_age": 3600,
+             "send_wildcard": False,
+             "vary_header": True
+         }
+     },
+     supports_credentials=True
+)
+
+# Global variables
+grid_updates = queue.Queue()
+mqtt_client = None
+mqtt_connected = False
+
+# Store alerts in memory
+alert_history = []
+
+# Fall detection settings - use env vars if available, otherwise use config
+SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', config['detector']['sequence_length']))
+FALL_THRESHOLD = float(os.getenv('FALL_THRESHOLD', config['detector']['fall_threshold']))
+CONSECUTIVE_FRAMES = int(os.getenv('CONSECUTIVE_FRAMES', config['detector']['consecutive_frames']))
+COOLDOWN_PERIOD = int(os.getenv('COOLDOWN_PERIOD', config['detector']['cooldown_period']))
+
+# Frame dimensions
+GRID_HEIGHT = 15
+GRID_WIDTH = 12
+
+# Initialize fall detector
+detector = None
+frame_buffer = deque(maxlen=SEQUENCE_LENGTH)
+high_prob_frames = deque(maxlen=CONSECUTIVE_FRAMES)
+last_fall_time = 0
+fall_probability = 0.0
+fall_in_progress = False
+prev_frame = None
+
+# MQTT Configuration
+MQTT_BROKER = os.getenv('MQTT_BROKER', config['mqtt']['broker'])
+MQTT_PORT = int(os.getenv('MQTT_PORT', config['mqtt']['port']))
+RAW_DATA_TOPIC = config['mqtt']['raw_data_topic']
+ALERTS_TOPIC = config['mqtt']['alerts_topic']
+
+logger.info(f"Loaded MQTT Configuration:")
+logger.info(f"Broker: {MQTT_BROKER}")
+logger.info(f"Port: {MQTT_PORT}")
+logger.info(f"Raw Data Topic: {RAW_DATA_TOPIC}")
+logger.info(f"Alerts Topic: {ALERTS_TOPIC}")
+
+# Mobile Text Alerts Configuration
+MOBILE_TEXT_ALERTS_KEY = os.getenv('MOBILE_TEXT_ALERTS_KEY')
+MOBILE_TEXT_ALERTS_V3_URL = os.getenv('MOBILE_TEXT_ALERTS_V3_URL')
+MOBILE_TEXT_ALERTS_FROM = os.getenv('MOBILE_TEXT_ALERTS_FROM')
+MOBILE_TEXT_ALERTS_GROUP = int(os.getenv('MOBILE_TEXT_ALERTS_GROUP'))
+
+logger.info("Mobile Text Alerts Configuration:")
+logger.info(f"API Key: {MOBILE_TEXT_ALERTS_KEY[:8]}...")
+logger.info(f"From Number: {MOBILE_TEXT_ALERTS_FROM}")
+logger.info(f"Alert Group: {MOBILE_TEXT_ALERTS_GROUP}")
+
+# Rate limit tracking
+last_sms_time = 0
+sms_requests_in_window = 0
+SMS_RATE_LIMIT = 30  # requests per minute
+SMS_RATE_WINDOW = 60  # seconds
+
+# Function to log model weights
+def log_model_weights(model):
+    try:
+        logger.info("Logging model weights for verification:")
+        for i, layer in enumerate(model.layers):
+            weights = layer.get_weights()
+            if weights:  # Check if layer has weights
+                logger.info(f"Layer {i} - {layer.name}:")
+                for j, weight in enumerate(weights):
+                    weight_stats = {
+                        'shape': weight.shape,
+                        'mean': np.mean(weight),
+                        'std': np.std(weight),
+                        'min': np.min(weight),
+                        'max': np.max(weight)
+                    }
+                    logger.info(f"  Weight {j}: {weight_stats}")
+            else:
+                logger.info(f"Layer {i} - {layer.name} has no weights.")
+    except Exception as e:
+        logger.error(f"Error while logging model weights: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+def init_detector_and_buffers():
+    """Initialize detector and all related buffers."""
+    global detector, frame_buffer, high_prob_frames, last_fall_time, fall_probability, fall_in_progress
+    
+    try:
+        logger.info("Initializing fall detector and buffers...")
+        
+        # Initialize detector 
+        detector = FallDetector(sequence_length=SEQUENCE_LENGTH)
+        model_path = "models/fall_detector_final"  # Updated path to latest model directory
+        
+        # Load model directly like CLI version
+        detector.load_model(model_path)
+        
+        # Verify model loaded
+        logger.info(f"Model loaded successfully from: {detector.model_path}")
+        logger.info(f"Model summary:")
+        detector.model.summary(print_fn=logger.info)
+
+        # Log model weights
+        log_model_weights(detector.model)
+        
+        # Initialize buffers
+        frame_buffer.clear()
+        high_prob_frames.clear()
+        last_fall_time = 0
+        fall_probability = 0.0
+        fall_in_progress = False
+        
+        logger.info("All buffers initialized")
+        logger.info(f"Fall detection settings:")
+        logger.info(f"Sequence Length: {SEQUENCE_LENGTH}")
+        logger.info(f"Fall Threshold: {FALL_THRESHOLD}")
+        logger.info(f"Consecutive Frames: {CONSECUTIVE_FRAMES}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error initializing detector and buffers: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+def get_dedicated_number_id():
+    """Get the dedicated number ID from Mobile Text Alerts API."""
+    try:
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {MOBILE_TEXT_ALERTS_KEY}'
+        }
+        
+        logger.info("Getting dedicated numbers from Mobile Text Alerts API...")
+        logger.info(f"Looking for number: {MOBILE_TEXT_ALERTS_FROM}")
+        
+        # Call the dedicated numbers endpoint
+        response = requests.get(
+            'https://api.mobile-text-alerts.com/v3/dedicated-numbers',
+            headers=headers
+        )
+        
+        response.raise_for_status()
+        numbers = response.json()
+        
+        logger.info(f"API Response: {json.dumps(numbers, indent=2)}")
+        
+        # Find our toll-free number in the list
+        for number in numbers.get('data', []):
+            logger.info(f"Checking number: {number.get('number')} (ID: {number.get('id')})")
+            if number.get('number') == MOBILE_TEXT_ALERTS_FROM:
+                logger.info(f"Found matching number! ID: {number.get('id')}")
+                return number.get('id')
+                
+        logger.error(f"Could not find dedicated number {MOBILE_TEXT_ALERTS_FROM} in the response")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error getting dedicated number: {str(e)}")
+        if hasattr(e, 'response'):
+            logger.error(f"Response status: {e.response.status_code}")
+            logger.error(f"Response body: {e.response.text}")
+        return None
+
+def send_mobile_text_alert(message, confidence=None):
+    """Send an SMS alert using Mobile Text Alerts API v3."""
+    try:
+        # Create a shorter message for alert history
+        alert_message = f"Fall detected with {confidence * 100:.0f}% confidence" if confidence else message
+        
+        # Use v3 payload structure with group
+        payload = {
+            'message': message,
+            'groups': [MOBILE_TEXT_ALERTS_GROUP],  # Send to configured group
+            'dedicatedNumber': MOBILE_TEXT_ALERTS_FROM  # Use the toll-free number directly
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {MOBILE_TEXT_ALERTS_KEY}'
+        }
+        
+        logger.info("Sending SMS with:")
+        logger.info(f"URL: {MOBILE_TEXT_ALERTS_V3_URL}")
+        logger.info(f"Headers: {headers}")
+        logger.info(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(
+            MOBILE_TEXT_ALERTS_V3_URL,
+            json=payload,
+            headers=headers,
+            timeout=10
+        )
+        
+        # Log the complete response
+        logger.info(f"Response Status: {response.status_code}")
+        logger.info(f"Response Headers: {dict(response.headers)}")
+        logger.info(f"Response Body: {response.text}")
+        
+        response.raise_for_status()  # Raise exception for non-200 status codes
+        
+        # Parse the response
+        response_data = response.json()
+        logger.info(f"Parsed Response: {json.dumps(response_data, indent=2)}")
+        
+        # Store successful alert in history
+        alert = {
+            'id': str(int(time.time() * 1000)),  # Timestamp as ID
+            'timestamp': datetime.now().isoformat(),
+            'confidence': confidence * 100 if confidence else None,
+            'status': 'delivered',
+            'message': alert_message
+        }
+        alert_history.append(alert)
+        
+        return True
+            
+    except requests.exceptions.RequestException as e:
+        error_msg = str(e)
+        if hasattr(e, 'response') and hasattr(e.response, 'json'):
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get('message', str(e))
+                logger.error(f"API Error Response: {json.dumps(error_data, indent=2)}")
+            except:
+                pass
+        
+        logger.error("SMS Alert Failed")
+        logger.error(f"Error Details: {error_msg}")
+        logger.error(f"Full Exception: {traceback.format_exc()}")
+        
+        # Store failed alert in history
+        alert = {
+            'id': str(int(time.time() * 1000)),  # Timestamp as ID
+            'timestamp': datetime.now().isoformat(),
+            'confidence': confidence * 100 if confidence else None,
+            'status': 'failed',
+            'message': alert_message,
+            'error': error_msg
+        }
+        alert_history.append(alert)
+        
+        return False
+
+def simulate_decibel_level(frame_array):
+    """Simulate decibel level based on sensor activity."""
+    # Count active sensors
+    active_sensors = np.sum(frame_array > 0)
+    
+    if active_sensors == 0:
+        # Ambient room noise (30-35 dB)
+        return random.uniform(30, 35)
+    else:
+        # Base level for footsteps (35-45 dB)
+        # More active sensors = slightly higher volume
+        base_level = random.uniform(35, 40)
+        # Add up to 5dB based on number of active sensors
+        activity_boost = min(5, active_sensors * 0.5)
+        return base_level + activity_boost
+
+def calculate_balance_metrics(frame_array):
+    """Calculate balance metrics from the current frame."""
+    try:
+        # Calculate center of pressure
+        total_pressure = np.sum(frame_array)
+        if total_pressure == 0:
+            return {
+                'stabilityScore': 1.0,
+                'swayArea': 0.0,
+                'weightDistribution': 50.0,
+                'copMovement': 0.0
+            }
+
+        weighted_x = np.sum(np.multiply(frame_array, np.arange(frame_array.shape[1]).reshape(1, -1))) / total_pressure
+        weighted_y = np.sum(np.multiply(frame_array, np.arange(frame_array.shape[0]).reshape(-1, 1))) / total_pressure
+
+        # Calculate stability score (inverse of pressure variance)
+        pressure_std = np.std(frame_array[frame_array > 0]) if np.any(frame_array > 0) else 0
+        stability_score = 1.0 - min(pressure_std / 2.0, 1.0)  # Normalize to 0-1
+
+        # Calculate sway area (area of non-zero pressure points)
+        sway_area = np.sum(frame_array > 0) * 4  # Assuming each sensor is 2x2 inches
+
+        # Calculate weight distribution (left-right balance)
+        left_pressure = np.sum(frame_array[:, :frame_array.shape[1]//2])
+        right_pressure = np.sum(frame_array[:, frame_array.shape[1]//2:])
+        weight_distribution = (left_pressure / (left_pressure + right_pressure) * 100) if (left_pressure + right_pressure) > 0 else 50
+
+        # Calculate CoP movement (using global state)
+        global last_cop_x, last_cop_y, last_cop_time
+        current_time = time.time()
+        
+        if 'last_cop_x' not in globals():
+            last_cop_x = weighted_x
+            last_cop_y = weighted_y
+            last_cop_time = current_time
+            cop_movement = 0.0
+        else:
+            dx = weighted_x - last_cop_x
+            dy = weighted_y - last_cop_y
+            dt = current_time - last_cop_time
+            if dt > 0:
+                cop_movement = np.sqrt(dx*dx + dy*dy) * 2.0 / dt  # Convert to inches/second (assuming 2 inch sensors)
+            else:
+                cop_movement = 0.0
+            
+            last_cop_x = weighted_x
+            last_cop_y = weighted_y
+            last_cop_time = current_time
+
+        return {
+            'stabilityScore': float(stability_score),
+            'swayArea': float(sway_area),
+            'weightDistribution': float(weight_distribution),
+            'copMovement': float(cop_movement)
+        }
+    except Exception as e:
+        logger.error(f"Error calculating balance metrics: {str(e)}")
+        return {
+            'stabilityScore': 1.0,
+            'swayArea': 0.0,
+            'weightDistribution': 50.0,
+            'copMovement': 0.0
+        }
+
+def calculate_wandering_metrics(frame_array):
+    """Calculate wandering metrics from the current frame."""
+    try:
+        # Constants for sensor array dimensions
+        GRID_WIDTH = 12  # sensors
+        GRID_HEIGHT = 15  # sensors
+        INCHES_PER_SENSOR = 4  # each sensor is 4x4 inches
+        FEET_PER_SENSOR = INCHES_PER_SENSOR / 12  # convert to feet
+        MIN_MOVEMENT_THRESHOLD = FEET_PER_SENSOR * 0.5  # Must move at least half a sensor to count
+
+        # Calculate center of pressure for current frame
+        total_pressure = np.sum(frame_array)
+        if total_pressure == 0:
+            return {
+                'pathLength': 0.0,
+                'areaCovered': 0.0,
+                'directionChanges': 0,
+                'repetitiveScore': 0.0
+            }
+
+        # Calculate current CoP in sensor coordinates (0-11, 0-14)
+        weighted_x = np.sum(np.multiply(frame_array, np.arange(frame_array.shape[1]).reshape(1, -1))) / total_pressure
+        weighted_y = np.sum(np.multiply(frame_array, np.arange(frame_array.shape[0]).reshape(-1, 1))) / total_pressure
+
+        # Update path history (store last 60 positions = 1 minute at 1Hz)
+        global path_history, last_direction, last_update_time
+        current_time = time.time()
+        
+        if 'path_history' not in globals():
+            path_history = deque(maxlen=60)
+            last_direction = None
+            last_update_time = current_time
+        
+        # Only update every 100ms to avoid over-counting small movements
+        if current_time - last_update_time < 0.1:
+            if len(path_history) > 0:
+                return {
+                    'pathLength': sum(segment_length for _, _, segment_length in path_history),
+                    'areaCovered': np.sum(frame_array > 0) * (FEET_PER_SENSOR * FEET_PER_SENSOR),
+                    'directionChanges': sum(1 for _, is_change, _ in path_history if is_change),
+                    'repetitiveScore': calculate_repetitive_score(path_history, GRID_WIDTH, GRID_HEIGHT, FEET_PER_SENSOR)
+                }
+            return {
+                'pathLength': 0.0,
+                'areaCovered': 0.0,
+                'directionChanges': 0,
+                'repetitiveScore': 0.0
+            }
+
+        # Convert CoP to feet
+        current_pos = (weighted_x * FEET_PER_SENSOR, weighted_y * FEET_PER_SENSOR)
+        
+        # Calculate movement since last position
+        if len(path_history) > 0:
+            last_pos = path_history[-1][0]
+            dx = current_pos[0] - last_pos[0]
+            dy = current_pos[1] - last_pos[1]
+            movement = np.sqrt(dx*dx + dy*dy)
+            
+            # Only record movement if it exceeds threshold
+            if movement >= MIN_MOVEMENT_THRESHOLD:
+                # Detect direction change
+                is_direction_change = False
+                if len(path_history) > 1:
+                    prev_pos = path_history[-2][0]
+                    prev_dx = last_pos[0] - prev_pos[0]
+                    prev_dy = last_pos[1] - prev_pos[1]
+                    if prev_dx != 0 or prev_dy != 0:
+                        angle = np.arctan2(dy, dx) - np.arctan2(prev_dy, prev_dx)
+                        angle = np.abs(np.degrees(angle))
+                        is_direction_change = angle > 45
+                
+                path_history.append((current_pos, is_direction_change, movement))
+                last_update_time = current_time
+        else:
+            # First position
+            path_history.append((current_pos, False, 0.0))
+            last_update_time = current_time
+
+        # Calculate total path length and direction changes
+        path_length = sum(segment_length for _, _, segment_length in path_history)
+        direction_changes = sum(1 for _, is_change, _ in path_history if is_change)
+
+        # Calculate area covered
+        area_covered = np.sum(frame_array > 0) * (FEET_PER_SENSOR * FEET_PER_SENSOR)
+
+        # Calculate repetitive score
+        repetitive_score = calculate_repetitive_score(path_history, GRID_WIDTH, GRID_HEIGHT, FEET_PER_SENSOR)
+
+        return {
+            'pathLength': float(path_length),
+            'areaCovered': float(area_covered),
+            'directionChanges': int(direction_changes),
+            'repetitiveScore': float(repetitive_score)
+        }
+    except Exception as e:
+        logger.error(f"Error calculating wandering metrics: {str(e)}")
+        return {
+            'pathLength': 0.0,
+            'areaCovered': 0.0,
+            'directionChanges': 0,
+            'repetitiveScore': 0.0
+        }
+
+def calculate_repetitive_score(path_history, grid_width, grid_height, feet_per_sensor):
+    """Calculate repetitive score based on path overlap."""
+    if len(path_history) <= 10:
+        return 0.0
+        
+    grid = np.zeros((grid_height, grid_width))
+    for pos, _, _ in path_history:
+        x = int(pos[0] / feet_per_sensor)
+        y = int(pos[1] / feet_per_sensor)
+        if 0 <= x < grid_width and 0 <= y < grid_height:
+            grid[y, x] += 1
+            
+    max_visits = np.max(grid)
+    if max_visits > 0:
+        return np.sum(grid > 1) / np.sum(grid > 0)
+    return 0.0
+
+def calculate_gait_metrics(frame_array):
+    """Calculate gait metrics from the current frame."""
+    try:
+        # Constants for sensor array dimensions
+        INCHES_PER_SENSOR = 4  # each sensor is 4x4 inches
+        FEET_PER_SENSOR = INCHES_PER_SENSOR / 12  # convert to feet
+
+        # Calculate center of pressure
+        total_pressure = np.sum(frame_array)
+        if total_pressure == 0:
+            return {
+                'speed': 0.0,
+                'strideLength': 0.0,
+                'symmetryScore': 1.0,
+                'stepCount': 0
+            }
+
+        # Calculate current CoP
+        weighted_x = np.sum(np.multiply(frame_array, np.arange(frame_array.shape[1]).reshape(1, -1))) / total_pressure
+        weighted_y = np.sum(np.multiply(frame_array, np.arange(frame_array.shape[0]).reshape(-1, 1))) / total_pressure
+
+        # Update gait history
+        global last_gait_pos, last_gait_time, step_positions, current_step_start
+        current_time = time.time()
+        
+        if 'last_gait_pos' not in globals():
+            last_gait_pos = (weighted_x * FEET_PER_SENSOR, weighted_y * FEET_PER_SENSOR)
+            last_gait_time = current_time
+            step_positions = deque(maxlen=4)  # Store last 4 step positions
+            current_step_start = None
+            return {
+                'speed': 0.0,
+                'strideLength': 0.0,
+                'symmetryScore': 1.0,
+                'stepCount': 0
+            }
+
+        # Convert current position to feet
+        current_pos = (weighted_x * FEET_PER_SENSOR, weighted_y * FEET_PER_SENSOR)
+        
+        # Calculate instantaneous speed
+        dx = current_pos[0] - last_gait_pos[0]
+        dy = current_pos[1] - last_gait_pos[1]
+        distance = np.sqrt(dx*dx + dy*dy)
+        dt = current_time - last_gait_time
+        speed = distance / dt if dt > 0 else 0
+
+        # Detect steps and calculate stride length
+        # A step is detected when we see significant vertical movement followed by a pause
+        if current_step_start is None:
+            if np.sum(frame_array) > 2:  # At least 3 sensors activated
+                current_step_start = current_pos
+        else:
+            # Check if step is complete (reduced sensor activation and position moved)
+            if np.sum(frame_array) < 2:  # Less than 2 sensors activated
+                step_distance = np.sqrt(
+                    (current_pos[0] - current_step_start[0])**2 +
+                    (current_pos[1] - current_step_start[1])**2
+                )
+                if step_distance > FEET_PER_SENSOR * 0.5:  # Reduced minimum step distance
+                    step_positions.append(current_step_start)
+                    current_step_start = None
+
+        # Calculate stride length from recent steps
+        stride_length = 0.0
+        if len(step_positions) >= 2:
+            # Calculate average distance between consecutive steps
+            stride_distances = []
+            for i in range(1, len(step_positions)):
+                prev = step_positions[i-1]
+                curr = step_positions[i]
+                stride_distances.append(
+                    np.sqrt((curr[0] - prev[0])**2 + (curr[1] - prev[1])**2)
+                )
+            stride_length = np.mean(stride_distances)
+
+        # Calculate symmetry score based on left/right pressure distribution
+        left_pressure = np.sum(frame_array[:, :frame_array.shape[1]//2])
+        right_pressure = np.sum(frame_array[:, frame_array.shape[1]//2:])
+        total_pressure = left_pressure + right_pressure
+        symmetry_score = 1.0 - abs(left_pressure - right_pressure) / total_pressure if total_pressure > 0 else 1.0
+
+        # Update position and time for next calculation
+        last_gait_pos = current_pos
+        last_gait_time = current_time
+
+        return {
+            'speed': float(speed),
+            'strideLength': float(stride_length),
+            'symmetryScore': float(symmetry_score),
+            'stepCount': len(step_positions)
+        }
+    except Exception as e:
+        logger.error(f"Error calculating gait metrics: {str(e)}")
+        return {
+            'speed': 0.0,
+            'strideLength': 0.0,
+            'symmetryScore': 1.0,
+            'stepCount': 0
+        }
+
+def has_significant_movement(frame_array, prev_frame=None, threshold=0.05):
+    """Check if there is significant movement in the frame."""
+    # Temporarily disabled - always return True to allow all frames
+    return True
+
+def process_frame(frame_data):
+    """Process a single frame of sensor data and check for falls."""
+    global frame_buffer, high_prob_frames, last_fall_time, fall_probability, fall_in_progress, prev_frame, alert_history
+    
+    try:
+        current_time = time.time()
+    
+        # Verify incoming frame
+        logger.debug(f"Incoming frame shape: {frame_data.shape}")
+        logger.debug(f"Frame data type: {frame_data.dtype}")
+    
+        # Check for no activity (all zeros)
+        if np.sum(frame_data) == 0:
+            # Clear buffers if no activity
+            frame_buffer.clear()
+            high_prob_frames.clear()
+            fall_in_progress = False
+            fall_probability = 0.0
+            logger.debug("No activity detected - cleared buffers")
+            return False, 0.0, 30.0, {
+                'stabilityScore': 1.0,
+                'swayArea': 0.0,
+                'weightDistribution': 50.0,
+                'copMovement': 0.0
+            }, {
+                'pathLength': 0.0,
+                'areaCovered': 0.0,
+                'directionChanges': 0,
+                'repetitiveScore': 0.0
+            }, {
+                'speed': 0.0,
+                'strideLength': 0.0,
+                'symmetryScore': 1.0,
+                'stepCount': 0
+            }
+
+        # Simulate decibel level
+        decibel_level = simulate_decibel_level(frame_data)
+        logger.debug(f"Simulated decibel level: {decibel_level:.1f} dB")
+
+        # Calculate metrics
+        balance_metrics = calculate_balance_metrics(frame_data)
+        wandering_metrics = calculate_wandering_metrics(frame_data)
+        gait_metrics = calculate_gait_metrics(frame_data)
+        
+        logger.debug(f"Balance metrics: {balance_metrics}")
+        logger.debug(f"Wandering metrics: {wandering_metrics}")
+        logger.debug(f"Gait metrics: {gait_metrics}")
+
+        # If we're in cooldown and a fall was detected, maintain the alert
+        if fall_in_progress and current_time - last_fall_time < COOLDOWN_PERIOD:
+            logger.debug(f"Maintaining fall alert. Cooldown remaining: {COOLDOWN_PERIOD - (current_time - last_fall_time):.1f}s")
+            return True, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+
+        # Movement check is now disabled, so we'll always add frames to the buffer
+        frame_buffer.append(frame_data)
+        logger.debug(f"Added frame to buffer - Frame buffer size: {len(frame_buffer)}/{SEQUENCE_LENGTH}")
+
+        # Only process if we have enough frames
+        if len(frame_buffer) < SEQUENCE_LENGTH:
+            logger.debug("Buffer not yet full. Waiting for more frames.")
+            return False, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+
+        # Process sequence for prediction
+        sequence = np.array([list(frame_buffer)])
+        sequence = sequence.reshape(sequence.shape + (1,))
+        
+        # Get prediction
+        fall_probability = float(detector.model.predict(sequence, verbose=0)[0][0])
+        logger.debug(f"Fall probability: {fall_probability:.4f}")
+
+        # Track high probability frames
+        is_high_prob = fall_probability >= FALL_THRESHOLD
+        high_prob_frames.append(is_high_prob)
+        logger.debug(f"High probability frames: {list(high_prob_frames)}")
+
+        # Check for fall detection conditions
+        if (len(high_prob_frames) == CONSECUTIVE_FRAMES and 
+            all(high_prob_frames) and 
+            current_time - last_fall_time >= COOLDOWN_PERIOD):
+            
+            last_fall_time = current_time
+            fall_in_progress = True
+            logger.info(f"Fall detected with probability: {fall_probability:.2f}")
+            
+            # Send SMS alert using Mobile Text Alerts
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            message = (
+                f"🚨 FALL DETECTED in Joe's room!\n\n"
+                f"Confidence: {fall_probability * 100:.0f}%\n"
+                f"Time: {timestamp}\n\n"
+                f"Please check on him immediately.\n\n"
+                f"👉 Emergency Services: https://emergency.scanlyticsinc.com/dispatch?location=joes_room"
+            )
+            
+            # Send SMS alert with confidence for alert history
+            sms_success = send_mobile_text_alert(message, fall_probability)
+            
+            return True, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+
+        # If we reach here, no fall is detected
+        # Clear fall_in_progress if we're out of cooldown
+        if current_time - last_fall_time >= COOLDOWN_PERIOD:
+            fall_in_progress = False
+    
+        return False, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+    
+    except Exception as e:
+        logger.error(f"Error processing frame: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False, fall_probability, 30.0, {
+            'stabilityScore': 1.0,
+            'swayArea': 0.0,
+            'weightDistribution': 50.0,
+            'copMovement': 0.0
+        }, {
+            'pathLength': 0.0,
+            'areaCovered': 0.0,
+            'directionChanges': 0,
+            'repetitiveScore': 0.0
+        }, {
+            'speed': 0.0,
+            'strideLength': 0.0,
+            'symmetryScore': 1.0,
+            'stepCount': 0
+        }
+
+def on_mqtt_message(client, userdata, message):
+    try:
+        logger.info(f"Raw MQTT payload received: {message.payload[:100]}...")
+        logger.info(f"Received MQTT message on topic: {message.topic}")
+        logger.debug(f"Raw payload: {message.payload}")
+        
+        # Decode and parse message
+        try:
+            data = json.loads(message.payload.decode())
+            # Only try to access keys if data is a dict
+            if isinstance(data, dict):
+                logger.debug(f"Parsed data keys: {list(data.keys())}")
+        except json.JSONDecodeError:
+            # Try parsing as plain array
+            try:
+                frame_data = eval(message.payload.decode())  # Safely evaluate as Python literal
+                if isinstance(frame_data, list):
+                    data = {'frame': frame_data}
+                    logger.debug("Parsed message as plain array")
+                else:
+                    raise ValueError("Invalid frame data format")
+            except Exception as e:
+                logger.error(f"Failed to parse message: {e}")
+                logger.error(f"Raw message: {message.payload[:100]}...")  # Log first 100 chars
+                return
+
+        logger.debug(f"Received message on topic {message.topic}")
+        if isinstance(data, dict):
+            logger.debug(f"Message data keys: {list(data.keys())}")
+
+        # Handle different message topics
+        if message.topic == "controller/networkx/frame/rft":
+            # Extract frame data
+            frame_data = None
+            if isinstance(data, dict):
+                if 'payload' in data and 'data' in data['payload']:
+                    frame_data = data['payload']['data']
+                    logger.debug("Using payload.data format")
+                elif 'frame' in data:
+                    frame_data = data['frame']
+                    logger.debug("Using direct frame format")
+                else:
+                    logger.error(f"No valid frame data found in dict. Keys: {list(data.keys())}")
+                    return
+            elif isinstance(data, list):
+                frame_data = data
+                logger.debug("Using direct list format")
+            
+            if not isinstance(frame_data, list) or not frame_data:
+                logger.error(f"Invalid frame data format: {type(frame_data)}")
+                return
+
+            # Now it's safe to process frame_data
+            logger.info(f"Processing frame data: shape={np.array(frame_data).shape}")
+
+            # Convert frame data to numpy array and process
+            try:
+                # Log frame data details for debugging
+                logger.debug(f"Frame data type: {type(frame_data)}")
+                if isinstance(frame_data, list):
+                    logger.debug(f"Frame data shape: {len(frame_data)}x{len(frame_data[0]) if frame_data else 0}")
+                
+                frame_array = np.array(frame_data, dtype=np.float32)
+                logger.debug(f"Initial frame array shape: {frame_array.shape}")
+                
+                # Check dimensions and transpose if needed
+                if frame_array.shape != (GRID_HEIGHT, GRID_WIDTH):
+                    if frame_array.shape == (GRID_WIDTH, GRID_HEIGHT):
+                        frame_array = frame_array.T
+                        logger.debug("Transposed frame array to match expected dimensions")
+                    else:
+                        logger.error(f"Frame size mismatch: got {frame_array.shape}, expected ({GRID_HEIGHT}, {GRID_WIDTH})")
+                        return
+                
+                # Process frame data and get fall detection results
+                fall_detected, confidence, decibel_level, balance_metrics, wandering_metrics, gait_metrics = process_frame(frame_array)
+                logger.info(f"Processed frame: fall_detected={fall_detected}, confidence={confidence:.2f}, dB={decibel_level:.1f}")
+                
+                # Always send update to frontend for both normal walking and falls
+                update = {
+                    'grid': frame_array.tolist(),
+                    'fall_detected': fall_detected,
+                    'confidence': float(confidence) * 100,
+                    'decibelLevel': float(decibel_level),
+                    'balanceMetrics': balance_metrics,
+                    'wanderingMetrics': wandering_metrics,
+                    'gaitMetrics': gait_metrics,
+                    'timestamp': datetime.now().isoformat()
+                }
+                grid_updates.put(update)
+                
+                if fall_detected:
+                    logger.info("🚨 Fall detected! Sending alert to frontend")
+                else:
+                    logger.debug("Normal activity - updating grid visualization")
+                
+            except Exception as e:
+                logger.error(f"Error processing frame data: {str(e)}")
+                logger.error(f"Frame data type: {type(frame_data)}")
+                if isinstance(frame_data, list):
+                    logger.error(f"Frame data shape: {len(frame_data)}x{len(frame_data[0]) if frame_data else 0}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return
+
+        elif message.topic == "analysis/path/rft/active":
+            # For path data, just pass it through if it's a list
+            if isinstance(data, list):
+                logger.debug("Received path data as list")
+                update = {
+                    'path': data,
+                    'timestamp': datetime.now().isoformat()
+                }
+                grid_updates.put(update)
+                logger.info(f"Processed path data: length={len(data)}")
+            else:
+                logger.error(f"Invalid path data format: {type(data)}")
+
+    except Exception as e:
+        logger.error(f"Error in MQTT message handler: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+def on_mqtt_connect(client, userdata, flags, rc):
+    """Handle MQTT connection events with enhanced logging"""
+    global mqtt_connected
+    connection_codes = {
+        0: "Connection successful",
+        1: "Connection refused - incorrect protocol version",
+        2: "Connection refused - invalid client identifier",
+        3: "Connection refused - server unavailable",
+        4: "Connection refused - bad username or password",
+        5: "Connection refused - not authorised"
+    }
+    
+    logger.info(f"MQTT Connection attempt result - RC: {rc}")
+    logger.info(f"Connection flags: {flags}")
+    
+    if rc == 0:
+        logger.info("✅ Successfully connected to MQTT broker")
+        mqtt_connected = True
+        
+        # Define topics with descriptions for better logging
+        topics = [
+            (RAW_DATA_TOPIC, 0, "Raw sensor data"),
+            (ALERTS_TOPIC, 0, "Fall detection alerts"),
+            ("controller/networkx/frame/rft", 0, "Frame data"),
+            ("analysis/path/rft/active", 0, "Active path data"),
+            ("analysis/path/rft/complete", 0, "Completed path data")
+        ]
+        
+        # Subscribe to topics with enhanced logging
+        subscription_results = []
+        for topic, qos, description in topics:
+            try:
+                result, mid = client.subscribe(topic, qos)
+                subscription_status = "Success" if result == 0 else f"Failed (code: {result})"
+                logger.info(f"📌 {description} subscription - Topic: {topic}, QoS: {qos}, Status: {subscription_status}")
+                subscription_results.append((topic, result == 0))
+            except Exception as e:
+                logger.error(f"❌ Error subscribing to {topic}: {str(e)}")
+                import traceback
+                logger.error(f"Subscription error traceback: {traceback.format_exc()}")
+                subscription_results.append((topic, False))
+        
+        # Log subscription summary
+        successful = len([r for _, r in subscription_results if r])
+        failed = len(subscription_results) - successful
+        logger.info(f"📊 Subscription Summary: {successful} successful, {failed} failed")
+        
+        if failed > 0:
+            logger.warning("⚠️ Some topic subscriptions failed - check logs for details")
+            for topic, success in subscription_results:
+                if not success:
+                    logger.warning(f"Failed subscription: {topic}")
+        else:
+            logger.info("✅ All MQTT topic subscriptions completed successfully")
+        
+        try:
+            # Log client details for debugging
+            client_id = getattr(client, '_client_id', b'unknown').decode()
+            clean_session = getattr(client, '_clean_session', None)
+            logger.debug(f"Client Details - ID: {client_id}, Clean Session: {clean_session}")
+            
+            # Attempt to get protocol version
+            protocol = getattr(client, '_protocol', 'unknown')
+            logger.debug(f"Protocol Version: {protocol}")
+            
+        except Exception as e:
+            logger.warning(f"Unable to get detailed client info: {str(e)}")
+            
+    else:
+        error_msg = connection_codes.get(rc, f"Unknown error code: {rc}")
+        logger.error(f"❌ Failed to connect to MQTT broker: {error_msg}")
+        logger.error(f"Connection Details - Host: {MQTT_BROKER}, Port: {MQTT_PORT}")
+        mqtt_connected = False
+        
+        # Log additional connection details for debugging
+        logger.debug(f"Connection flags: {flags}")
+        logger.debug(f"User data: {userdata}")
+        
+        # Attempt to log broker status if possible
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)  # 2 second timeout
+            result = sock.connect_ex((MQTT_BROKER, MQTT_PORT))
+            logger.debug(f"Broker port status: {'open' if result == 0 else 'closed'} (code: {result})")
+            sock.close()
+        except Exception as e:
+            logger.debug(f"Could not check broker status: {str(e)}")
+            import traceback
+            logger.debug(f"Broker check error traceback: {traceback.format_exc()}")
+        
+        # Attempt reconnection if appropriate
+        if rc in [3, 4, 5]:  # Server unavailable or auth issues
+            logger.info("🔄 Will attempt automatic reconnection...")
+
+def on_disconnect(client, userdata, rc):
+    """Callback when disconnected from MQTT broker."""
+    global mqtt_connected
+    mqtt_connected = False
+    if rc != 0:
+        logger.error(f"Unexpected MQTT disconnection with code: {rc}")
+    else:
+        logger.info("Disconnected from MQTT broker")
+    
+    # Attempt to reconnect
+    logger.info("Attempting to reconnect to MQTT broker...")
+    try:
+        client.reconnect()
+    except Exception as e:
+        logger.error(f"Failed to reconnect: {e}")
+
+def setup_mqtt():
+    global mqtt_client
+    try:
+        logger.info(f"Attempting to connect to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
+        mqtt_client = mqtt.Client(client_id=f"fall_detector_{int(time.time())}")
+        mqtt_client.on_connect = on_mqtt_connect
+        mqtt_client.on_message = on_mqtt_message
+        mqtt_client.on_disconnect = on_disconnect
+        
+        # Set up MQTT connection with keep-alive and reconnect settings
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+        mqtt_client.loop_start()
+        logger.info("MQTT client setup completed and loop started")
+        return True
+    except Exception as e:
+        logger.error(f"Error setting up MQTT client: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+@app.route('/api/status')
+def status():
+    return "alive"
+
+@app.route('/api/alert-history')
+def get_alert_history():
+    """Get alert history."""
+    try:
+        # Return the alert history in reverse chronological order
+        return jsonify(list(reversed(alert_history)))
+    except Exception as e:
+        logger.error(f"Error in alert_history endpoint: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/mqtt/status')
+def mqtt_status():
+    """Get MQTT connection status with enhanced error handling"""
+    try:
+        logger.info("MQTT status endpoint called")
+        global mqtt_connected
+        response = jsonify({
+            'connected': mqtt_connected,
+            'timestamp': datetime.now().isoformat()
+        })
+        logger.info(f"Returning MQTT status: connected={mqtt_connected}")
+        return response
+    except Exception as e:
+        logger.error(f"Error in mqtt_status endpoint: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/grid-stream')
+def grid_stream():
+    """SSE endpoint for grid updates with enhanced error handling and logging"""
+    try:
+        logger.info("Grid stream endpoint called")
+        
+        def generate():
+            while True:
+                try:
+                    # Wait for updates with timeout
+                    update = grid_updates.get(timeout=1)
+                    
+                    if 'grid' in update:
+                        event_type = 'grid'
+                        logger.debug(f"Grid update - shape: {len(update['grid'])}x{len(update['grid'][0]) if update['grid'] else 0}")
+                    elif 'path' in update:
+                        event_type = 'path'
+                        logger.debug("Path update received")
+                    else:
+                        event_type = 'keepalive'
+                        logger.debug("Sending keepalive")
+                    
+                    yield f"event: {event_type}\ndata: {json.dumps(update)}\n\n"
+                    
+                except queue.Empty:
+                    # Just send keepalive
+                    yield f"event: keepalive\ndata: {json.dumps({'keepalive': True})}\n\n"
+
+        logger.info("Setting up SSE response")
+        response = Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+                'Access-Control-Allow-Origin': 'http://localhost:5173',
+                'Access-Control-Allow-Credentials': 'true'
+            }
+        )
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error setting up grid_stream: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/sms/test', methods=['POST'])
+def test_sms():
+    """Test endpoint for SMS alerts."""
+    try:
+        test_message = (
+            "🔔 Test SMS from Fall Detection System\n"
+            f"From: {MOBILE_TEXT_ALERTS_FROM}\n"
+            f"To Group: {MOBILE_TEXT_ALERTS_GROUP}\n"
+            f"To Phone: +16082152426\n"
+            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        success = send_mobile_text_alert(test_message)
+        
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": "Test SMS sent successfully"
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Failed to send test SMS"
+            }), 500
+            
+    except Exception as e:
+        error_details = str(e)
+        logger.error(f"Failed to send test SMS: {error_details}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to send test SMS",
+            "error": error_details
+        }), 500
+
+if __name__ == '__main__':
+    try:
+        logger.info("="*50)
+        logger.info("Starting Fall Detection System")
+        logger.info("="*50)
+        
+        logger.info("Step 1: Loading configuration...")
+        with open('config.yaml', 'r') as file:
+            config = yaml.safe_load(file)
+        logger.info("Configuration loaded successfully")
+        
+        logger.info("\nStep 2: Initializing fall detector...")
+        if not init_detector_and_buffers():
+            logger.error("Failed to initialize fall detector. Exiting...")
+            exit(1)
+        logger.info("Fall detector initialized successfully")
+        
+        logger.info("\nStep 3: Setting up MQTT client...")
+        if not setup_mqtt():
+            logger.error("Failed to setup MQTT client. Exiting...")
+            exit(1)
+        logger.info("MQTT client setup successfully")
+        
+        logger.info("\nStep 4: Starting Flask server...")
+        app.run(host='0.0.0.0', port=5001, threaded=True, debug=True)
+    except Exception as e:
+        logger.error(f"Startup error: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Cleanup
+        if mqtt_client:
+            logger.info("Cleaning up MQTT connection...")
+            mqtt_client.loop_stop()
+            mqtt_client.disconnect()
+        exit(1)
