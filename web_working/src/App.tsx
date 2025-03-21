@@ -11,6 +11,7 @@ import WanderingAssessment from './components/WanderingAssessment';
 import { MobilityHealthScore } from './components/MobilityHealthScore';
 import TestControls from './components/TestControls';
 import BuildingVisualization from './components/3d/BuildingVisualization';
+import { ErrorBoundary } from 'react-error-boundary';
 
 function App() {
   const { gridData, stats } = useDataStream();
@@ -84,7 +85,9 @@ function App() {
 
         {view === 'building-view' && (
           <div className="h-[800px] w-full bg-gray-800 rounded-lg overflow-hidden">
-            <BuildingVisualization data={gridData} />
+            <ErrorBoundary fallback={<div className="p-4 text-white">Error loading 3D visualization. Check console for details.</div>}>
+              <BuildingVisualization data={gridData} />
+            </ErrorBoundary>
           </div>
         )}
       </div>
