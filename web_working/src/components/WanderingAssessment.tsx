@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Map } from 'lucide-react';
 import Chart from 'chart.js/auto';
+import { CollapsiblePanel } from './CollapsiblePanel';
 
 interface WanderingMetrics {
   pathLength: number;
@@ -120,12 +121,11 @@ const WanderingAssessment: React.FC<Props> = ({ metrics }) => {
   }, [pathHistory]);
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-lg p-4">
-      <div className="flex items-center gap-2 mb-4">
-        <Map className="w-5 h-5 text-blue-500" />
-        <h3 className="font-medium text-gray-100">Wandering Assessment</h3>
-      </div>
-
+    <CollapsiblePanel
+      title="Wandering Assessment"
+      subtitle="Movement Pattern Analysis"
+      icon={<Map className="w-5 h-5 text-blue-500" />}
+    >
       {/* Path Length Graph */}
       <div className="h-32 mb-4">
         <canvas ref={pathGraphRef} />
@@ -155,7 +155,7 @@ const WanderingAssessment: React.FC<Props> = ({ metrics }) => {
           <div className="font-medium text-gray-100">{(metrics.repetitiveScore * 100).toFixed(0)}%</div>
         </div>
       </div>
-    </div>
+    </CollapsiblePanel>
   );
 };
 

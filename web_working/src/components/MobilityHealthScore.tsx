@@ -1,6 +1,7 @@
 import React from 'react';
 import { Activity } from 'lucide-react';
 import clsx from 'clsx';
+import { CollapsiblePanel } from './CollapsiblePanel';
 
 // Baseline metrics for comparison
 const BASELINE_METRICS = {
@@ -39,20 +40,12 @@ export function MobilityHealthScore({ currentMetrics }: Props) {
   const { level, color } = getRiskLevel(currentScore);
 
   return (
-    <div className={clsx(
-      "rounded-lg p-3 border border-gray-700",
-      "bg-gray-800/50 backdrop-blur-sm",
-      "transition-colors duration-500 ease-in-out"
-    )}>
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-2">
-        <Activity className="w-5 h-5 text-purple-400" />
-        <div className="flex flex-col">
-          <span className="font-bold text-base">Mobility Health Score</span>
-          <span className="text-xs text-gray-400">Overall Assessment</span>
-        </div>
-      </div>
-
+    <CollapsiblePanel
+      title="Mobility Health Score"
+      subtitle="Overall Assessment"
+      icon={<Activity className="w-5 h-5 text-purple-400" />}
+      className="p-0"
+    >
       {/* Risk Level */}
       <div className="text-center mb-2">
         <span className="text-sm text-gray-400">Risk Level: </span>
@@ -102,6 +95,6 @@ export function MobilityHealthScore({ currentMetrics }: Props) {
           <div className="text-base font-medium">{currentMetrics.strideLength.toFixed(1)} ft</div>
         </div>
       </div>
-    </div>
+    </CollapsiblePanel>
   );
 } 

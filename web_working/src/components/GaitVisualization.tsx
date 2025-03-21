@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { GridData } from '../types/grid';
 import { Footprints } from 'lucide-react';
 import clsx from 'clsx';
+import { CollapsiblePanel } from './CollapsiblePanel';
 
 interface GaitVisualizationProps {
   data: GridData;
@@ -116,25 +117,17 @@ export function GaitVisualization({ data }: GaitVisualizationProps) {
   }, [data.frame]);
 
   return (
-    <div className={clsx(
-      "rounded-lg p-6 border border-gray-700",
-      "bg-gray-800/50 backdrop-blur-sm",
-      "transition-colors duration-500 ease-in-out"
-    )}>
-      <div className="flex items-center gap-3 mb-4">
-        <Footprints className="w-6 h-6 text-blue-400" />
-        <div className="flex flex-col">
-          <span className="font-bold text-lg">Gait Pattern</span>
-          <span className="text-sm text-gray-400">Center of Pressure Movement</span>
-        </div>
-      </div>
-      
-        <canvas
-          ref={canvasRef}
+    <CollapsiblePanel
+      title="Gait Pattern"
+      subtitle="Center of Pressure Movement"
+      icon={<Footprints className="w-6 h-6 text-blue-400" />}
+    >
+      <canvas
+        ref={canvasRef}
         width={200}
         height={250}
         className="w-full bg-gray-900/50 rounded-lg backdrop-blur-sm"
-        />
-      </div>
+      />
+    </CollapsiblePanel>
   );
 } 

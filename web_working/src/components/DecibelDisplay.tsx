@@ -1,5 +1,6 @@
 import { Volume2 } from 'lucide-react';
 import clsx from 'clsx';
+import { CollapsiblePanel } from './CollapsiblePanel';
 
 interface DecibelDisplayProps {
   level: number;
@@ -28,12 +29,10 @@ export function DecibelDisplay({ level }: DecibelDisplayProps) {
   };
 
   return (
-    <div className={clsx(
-      "rounded-lg p-6 border border-gray-700",
-      getBgColor(),
-      "transition-colors duration-500 ease-in-out"
-    )}>
-      <div className="flex items-center gap-3 mb-4">
+    <CollapsiblePanel
+      title={`${level.toFixed(1)} dB`}
+      subtitle={level < 35 ? 'Ambient Noise' : level < 40 ? 'Light Footsteps' : 'Heavy Footsteps'}
+      icon={
         <Volume2 
           className={clsx(
             'w-6 h-6 transition-all duration-300',
@@ -41,19 +40,9 @@ export function DecibelDisplay({ level }: DecibelDisplayProps) {
             level > 35 && 'animate-pulse'
           )} 
         />
-        <div className="flex flex-col">
-          <span className={clsx(
-            "font-bold text-2xl transition-all duration-300",
-            getColor()
-          )}>
-            {level.toFixed(1)} dB
-          </span>
-          <span className="text-sm text-gray-400">
-            {level < 35 ? 'Ambient Noise' : level < 40 ? 'Light Footsteps' : 'Heavy Footsteps'}
-          </span>
-        </div>
-      </div>
-      
+      }
+      className={getBgColor()}
+    >
       <div className="h-3 bg-gray-700/50 rounded-full overflow-hidden backdrop-blur-sm">
         <div 
           className={clsx(
@@ -80,6 +69,6 @@ export function DecibelDisplay({ level }: DecibelDisplayProps) {
         <span className="text-gray-400">30 dB</span>
         <span className="text-gray-400">45 dB</span>
       </div>
-    </div>
+    </CollapsiblePanel>
   );
 } 

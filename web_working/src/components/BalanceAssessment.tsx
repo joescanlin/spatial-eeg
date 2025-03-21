@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import { BalanceMetrics } from '../types/grid';
 import clsx from 'clsx';
 import Chart from 'chart.js/auto';
+import { CollapsiblePanel } from './CollapsiblePanel';
 
 interface BalanceAssessmentProps {
   metrics: BalanceMetrics;
@@ -97,19 +98,12 @@ export function BalanceAssessment({ metrics }: BalanceAssessmentProps) {
   }, [metrics]);
 
   return (
-    <div className={clsx(
-      "rounded-lg p-6 border border-gray-700",
-      "bg-gray-800/50 backdrop-blur-sm",
-      "transition-colors duration-500 ease-in-out"
-    )}>
-      <div className="flex items-center gap-3 mb-4">
-        <Activity className="w-6 h-6 text-green-400" />
-        <div className="flex flex-col">
-          <span className="font-bold text-lg">Balance Assessment</span>
-          <span className="text-sm text-gray-400">Real-time Balance Metrics</span>
-        </div>
-      </div>
-
+    <CollapsiblePanel
+      title="Balance Assessment"
+      subtitle="Real-time Balance Metrics"
+      icon={<Activity className="w-6 h-6 text-green-400" />}
+      defaultExpanded={true}
+    >
       <div className="h-[200px]">
         <canvas ref={chartRef} />
       </div>
@@ -132,6 +126,6 @@ export function BalanceAssessment({ metrics }: BalanceAssessmentProps) {
           <span className="font-semibold">{metrics.copMovement.toFixed(1)} in/s</span>
         </div>
       </div>
-    </div>
+    </CollapsiblePanel>
   );
 } 
