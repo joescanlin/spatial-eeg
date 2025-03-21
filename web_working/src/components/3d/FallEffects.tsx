@@ -62,6 +62,20 @@ export default function FallEffects({ fallDetected, fallProbability }: FallEffec
     });
   }, []);
   
+  // Pre-compute spring animations for each ripple - IMPORTANT: must be outside the render loop
+  const rippleSprings = ripples.map(ripple => 
+    useSpring({
+      size: fallDetected ? RIPPLE_MAX_SIZE : 0,
+      opacity: fallDetected ? 0.7 : 0,
+      from: { size: 0, opacity: fallDetected ? 0.7 : 0 },
+      delay: ripple.delay,
+      config: { 
+        tension: 80, 
+        friction: 20 
+      }
+    })
+  );
+  
   // Particle explosion effect for impact
   const particles = useMemo(() => {
     const particles = [];
@@ -139,17 +153,9 @@ export default function FallEffects({ fallDetected, fallProbability }: FallEffec
   return (
     <group>
       {/* Multiple ripple effects with different timing */}
-      {ripples.map(ripple => {
-        const springProps = useSpring({
-          size: fallDetected ? RIPPLE_MAX_SIZE : 0,
-          opacity: fallDetected ? 0.7 : 0,
-          from: { size: 0, opacity: fallDetected ? 0.7 : 0 },
-          delay: ripple.delay,
-          config: { 
-            tension: 80, 
-            friction: 20 
-          }
-        });
+      {ripples.map((ripple, index) => {
+        // Use pre-computed springs instead of creating new ones in the map function
+        const springProps = rippleSprings[index];
         
         return (
           <a.mesh
