@@ -16,17 +16,29 @@ const SENSOR_INCHES = 4; // Each sensor is 4" x 4"
 const INCH_TO_UNIT = 0.04; // Conversion factor from inches to 3D units
 const SENSOR_SIZE = SENSOR_INCHES * INCH_TO_UNIT; // Size of each sensor pillar (properly scaled)
 
-const MAX_PILLAR_HEIGHT = 2.0; // Increased maximum height for more dramatic effect
+// Modified height constants - lower fixed height for all active cells
+const MAX_PILLAR_HEIGHT = 0.3; // Much lower fixed height for active sensors
 const MIN_PILLAR_HEIGHT = 0.01; // Minimum height (nearly invisible)
-const HEIGHT_GROW_SPEED = 3.0; // How quickly pillars grow when activated
+const HEIGHT_GROW_SPEED = 4.0; // Faster grow speed for fixed height
 const HEIGHT_SHRINK_SPEED = 2.5; // How quickly pillars shrink when deactivated
 const TRAIL_DECAY_TIME = 4.0; // How long the trail effect lasts in seconds
 
 // Enhanced color palette for visualization
 const INACTIVE_COLOR = new THREE.Color(0x1e293b); // Dark slate blue (nearly invisible)
 const INITIAL_COLOR = new THREE.Color(0x3b82f6); // Medium blue
-const ACTIVE_COLOR = new THREE.Color(0x60a5fa); // Bright blue
-const PEAK_COLOR = new THREE.Color(0x93c5fd); // Light blue
+
+// Heat map colors - green to red progression with more saturation and brightness
+const HEAT_COLORS = [
+  new THREE.Color(0x00ff00), // Bright green - start
+  new THREE.Color(0x99ff00), // Lime green
+  new THREE.Color(0xffff00), // Bright yellow
+  new THREE.Color(0xff9900), // Bright orange
+  new THREE.Color(0xff0000)  // Bright red - end
+];
+
+// Duration settings for heat map
+const MAX_HEAT_DURATION = 3.0; // Seconds to reach maximum heat (red)
+const REACTIVATION_WINDOW = 0.25; // Seconds to consider as continuous activation if briefly deactivated
 
 // Footprint visualization enhancement colors
 const FOOTPRINT_COLOR = new THREE.Color(0x4ade80); // Green for footprints
@@ -48,13 +60,17 @@ export default function SensorGrid({ data }: SensorGridProps) {
     height: number;
     active: boolean;
     color: THREE.Color;
+    totalDuration: number; // Track total standing duration
+    lastDeactivation: number; // Track when cell was last deactivated
   }[][]>(
     Array(GRID_HEIGHT).fill(0).map(() => 
       Array(GRID_WIDTH).fill(0).map(() => ({
         timestamp: 0,
-        height: 0.01,
+        height: MIN_PILLAR_HEIGHT || 0.01, // Fallback if MIN_PILLAR_HEIGHT is undefined
         active: false,
-        color: INACTIVE_COLOR.clone()
+        color: INACTIVE_COLOR ? INACTIVE_COLOR.clone() : new THREE.Color(0x1e293b),
+        totalDuration: 0, // Initial duration is 0
+        lastDeactivation: 0 // No previous deactivation
       }))
     )
   );
@@ -132,51 +148,85 @@ export default function SensorGrid({ data }: SensorGridProps) {
             const worldZ = row - GRID_HEIGHT/2 + 0.5;
             newActivations.push([worldX, worldZ]);
             
-            sensorState.timestamp = currentTime;
+            // Check if this is a reactivation within the window
+            const reactivationTime = currentTime - sensorState.lastDeactivation;
+            const isReactivation = sensorState.lastDeactivation > 0 && reactivationTime < REACTIVATION_WINDOW;
+            
+            if (!isReactivation) {
+              // New activation - reset timestamp but preserve duration
+              sensorState.timestamp = currentTime;
+            }
+            // Always set to active
             sensorState.active = true;
           }
           
-          // Grow height up to max with smooth acceleration
+          // Set a fixed height with slight variation based on pressure
           const timeSinceActivation = currentTime - sensorState.timestamp;
-          const growthFactor = Math.min(1, timeSinceActivation / 1.0); // Normalize to 0-1 over 1 second
-          const targetHeight = MAX_PILLAR_HEIGHT * (value > 0.5 ? 1.0 : 0.7); // Taller for higher pressure
+          const growthFactor = Math.min(1, timeSinceActivation * HEIGHT_GROW_SPEED); // Quick growth to base height
+          const pressureVariation = 0.1 * (value > 0.5 ? value : 0.5); // Small height variation based on pressure
           
-          // Smooth growth with easing function
-          const easedGrowth = 1 - Math.pow(1 - growthFactor, 3); // Cubic ease-out
-          sensorState.height = MIN_PILLAR_HEIGHT + (targetHeight - MIN_PILLAR_HEIGHT) * easedGrowth;
+          // Fixed height with smooth growth animation and slight pressure variation
+          const targetHeight = MAX_PILLAR_HEIGHT + pressureVariation;
+          sensorState.height = MIN_PILLAR_HEIGHT + (targetHeight - MIN_PILLAR_HEIGHT) * growthFactor;
           
-          // Enhanced color transition with special handling for footprint patterns and impact points
-          let colorT;
+          // Update total standing duration (accumulate time)
+          sensorState.totalDuration += deltaTime;
           
-          // Detect footprint patterns (small isolated active areas)
+          // Calculate heat map factor based on total duration, capped at maximum
+          const durationHeatFactor = Math.min(1, sensorState.totalDuration / MAX_HEAT_DURATION);
+          
+          // Detect special patterns
           const isFootprint = checkIsFootprint(data, row, col);
-          // Detect impact points (high pressure areas with neighbors)
           const isImpact = value > 0.7 && checkIsImpactPoint(data, row, col);
           
           if (isImpact) {
             // Use impact color (red) with pulsing effect
             const pulse = 0.7 + Math.sin(currentTime * 5) * 0.3;
-            sensorState.color.copy(IMPACT_COLOR).multiplyScalar(pulse);
-          } else if (isFootprint) {
-            // Use footprint color (green)
-            sensorState.color.copy(FOOTPRINT_COLOR);
-          } else if (timeSinceActivation < 0.5) {
-            // First phase: inactive to initial (0-0.5s)
-            colorT = timeSinceActivation / 0.5;
-            sensorState.color.copy(INACTIVE_COLOR).lerp(INITIAL_COLOR, colorT);
-          } else if (timeSinceActivation < 1.2) {
-            // Second phase: initial to active (0.5-1.2s)
-            colorT = (timeSinceActivation - 0.5) / 0.7;
-            sensorState.color.copy(INITIAL_COLOR).lerp(ACTIVE_COLOR, colorT);
+            if (sensorState.color && IMPACT_COLOR) {
+              sensorState.color.copy(IMPACT_COLOR).multiplyScalar(pulse);
+            }
+          } else if (isFootprint && timeSinceActivation < 0.5) {
+            // Only use footprint color for brief initial period, then transition to heat map
+            if (sensorState.color && FOOTPRINT_COLOR) {
+              sensorState.color.copy(FOOTPRINT_COLOR);
+            }
           } else {
-            // Final phase: active to peak (after 1.2s)
-            colorT = Math.min(1, (timeSinceActivation - 1.2) / 0.8);
-            sensorState.color.copy(ACTIVE_COLOR).lerp(PEAK_COLOR, colorT);
+            // Apply heat map coloring based on total standing duration
+            // Calculate which segment of the color gradient to use
+            const segments = HEAT_COLORS.length - 1;
+            const segment = Math.min(segments, Math.floor(durationHeatFactor * segments));
+            
+            // Calculate blend factor between the two colors
+            const segmentValue = (durationHeatFactor * segments) - segment;
+            
+            // Safely check that we have valid segment indices
+            if (segment >= 0 && segment < HEAT_COLORS.length && 
+                segment + 1 < HEAT_COLORS.length && 
+                sensorState.color && 
+                HEAT_COLORS[segment] && 
+                HEAT_COLORS[segment + 1]) {
+              // Blend between the two adjacent colors in the heat map
+              sensorState.color.copy(HEAT_COLORS[segment]).lerp(HEAT_COLORS[segment + 1], segmentValue);
+            } else {
+              // Fallback to safe default color if something is undefined
+              if (sensorState.color) {
+                sensorState.color.copy(HEAT_COLORS[0] || new THREE.Color(0x4ade80));
+              }
+            }
           }
           
         } else if (sensorState.active) {
-          // Deactivate and start shrinking
+          // Cell just became inactive
+          // Record deactivation time for potential reactivation window
+          sensorState.lastDeactivation = currentTime;
+          
+          // Deactivate sensor
           sensorState.active = false;
+          
+          // Reset duration with decay over time (if not reactivated within window)
+          // Timer for this is handled outside of this condition
+          
+          // Start height shrinking
           sensorState.timestamp = currentTime;
         } else if (sensorState.height > MIN_PILLAR_HEIGHT) {
           // Continue shrinking deactivated sensor with smooth decay
@@ -191,7 +241,15 @@ export default function SensorGrid({ data }: SensorGridProps) {
           // Fade color back to inactive with delay (keeps color longer than height)
           if (timeSinceDeactivation > TRAIL_DECAY_TIME * 0.2) {
             const colorDecay = (timeSinceDeactivation - TRAIL_DECAY_TIME * 0.2) / (TRAIL_DECAY_TIME * 0.8);
-            sensorState.color.lerp(INACTIVE_COLOR, colorDecay * deltaTime * 3);
+            if (sensorState.color && INACTIVE_COLOR) {
+              sensorState.color.lerp(INACTIVE_COLOR, colorDecay * deltaTime * 3);
+            }
+          }
+          
+          // Gradually decrease total duration if not active for longer than reactivation window
+          if (currentTime - sensorState.lastDeactivation > REACTIVATION_WINDOW) {
+            // Decay the duration at 1/3 the rate it accumulates
+            sensorState.totalDuration = Math.max(0, sensorState.totalDuration - (deltaTime * 0.3));
           }
         }
       }
@@ -201,13 +259,21 @@ export default function SensorGrid({ data }: SensorGridProps) {
     if (newActivations.length > 0) {
       setRipples(prev => [
         ...prev,
-        ...newActivations.map(([x, z]) => ({
-          position: [x, 0.05, z] as [number, number, number],
-          startTime: currentTime,
-          size: 0,
-          duration: 1.0, // 1 second ripple effect
-          color: new THREE.Color(0x60a5fa)
-        }))
+        ...newActivations.map(([x, z]) => {
+          // Generate ripple color based on heat map colors - start with first color (green)
+          // Safely check HEAT_COLORS is available
+          const rippleColor = (HEAT_COLORS && HEAT_COLORS[0]) ? 
+            HEAT_COLORS[0].clone() : 
+            new THREE.Color(0x4ade80); // Fallback to hardcoded green
+          
+          return {
+            position: [x, 0.05, z] as [number, number, number],
+            startTime: currentTime,
+            size: 0,
+            duration: 1.0, // 1 second ripple effect
+            color: rippleColor
+          };
+        })
       ]);
     }
     
@@ -324,26 +390,30 @@ export default function SensorGrid({ data }: SensorGridProps) {
         // Add subtle pulse effect for active sensors
         const time = performance.now() * 0.001; // Current time in seconds
         const pulseScale = isActive ? 1.0 + Math.sin(time * 4) * 0.07 : 1.0; // Pulse between 0.93 and 1.07
-        const emissiveIntensity = isActive ? 0.3 + Math.sin(time * 3) * 0.15 : 0.1; // Pulse emissive glow
         
-        // Reduce MAX_PILLAR_HEIGHT to make pillars shorter and more representative of pressure
-        const MAX_DISPLAYED_HEIGHT = 0.5; // Max height of 0.5 units
-        const scaledHeight = MIN_PILLAR_HEIGHT + (height - MIN_PILLAR_HEIGHT) * (MAX_DISPLAYED_HEIGHT / MAX_PILLAR_HEIGHT);
+        // Enhanced emissive intensity for heat map effect - brighter for "hotter" colors
+        const baseEmissiveIntensity = isActive ? 1.0 : 0.2;
+        // Calculate how "hot" the color is (red component dominance) - with null/undefined check
+        const heatFactor = color && color.r !== undefined ? 
+          color.r / Math.max(0.1, ((color.g || 0) + (color.b || 0)) / 2) : 1.0;
+        // Increase emissive intensity for hotter colors - stronger effect for duration-based heat map
+        const emissiveIntensity = baseEmissiveIntensity * Math.max(1, heatFactor * 2.0) + (isActive ? Math.sin(time * 3) * 0.2 : 0);
         
         return (
           <mesh 
             key={key} 
-            position={[position[0], scaledHeight/2, position[2]]} 
-            scale={[pulseScale * SENSOR_SIZE * 0.8, scaledHeight, pulseScale * SENSOR_SIZE * 0.8]}
+            position={[position[0], height/2, position[2]]} 
+            scale={[pulseScale * SENSOR_SIZE * 0.8, height, pulseScale * SENSOR_SIZE * 0.8]}
             castShadow
             receiveShadow
           >
             <boxGeometry args={[1, 1, 1]} />
             <meshPhongMaterial 
               color={color} 
-              emissive={color} 
+              emissive={color}
               emissiveIntensity={emissiveIntensity}
-              shininess={60}
+              shininess={30}
+              specular={new THREE.Color(0xffffff)}
             />
           </mesh>
         );

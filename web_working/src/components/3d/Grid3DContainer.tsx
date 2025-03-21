@@ -31,12 +31,12 @@ export default function Grid3DContainer({ data, isVisible }: Grid3DContainerProp
         shadows
       >
         {/* Ambient light for general illumination */}
-        <ambientLight intensity={0.4} />
+        <ambientLight intensity={0.6} />
         
         {/* Directional light to cast shadows */}
         <directionalLight 
           position={[5, 10, 5]} 
-          intensity={0.8} 
+          intensity={1.0} 
           castShadow 
         />
         

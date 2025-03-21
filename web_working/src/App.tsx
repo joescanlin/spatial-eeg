@@ -10,11 +10,12 @@ import { BalanceAssessment } from './components/BalanceAssessment';
 import WanderingAssessment from './components/WanderingAssessment';
 import { MobilityHealthScore } from './components/MobilityHealthScore';
 import TestControls from './components/TestControls';
+import BuildingVisualization from './components/3d/BuildingVisualization';
 
 function App() {
   const { gridData, stats } = useDataStream();
   const { alerts, isLoading: alertsLoading, error: alertsError } = useAlertHistory();
-  const [view, setView] = useState<'dashboard' | 'training-data'>('training-data');
+  const [view, setView] = useState<'dashboard' | 'training-data' | 'building-view'>('training-data');
 
   // Combine metrics for mobility health score
   const mobilityMetrics = {
@@ -41,6 +42,12 @@ function App() {
               onClick={() => setView('training-data')}
             >
               Training Data
+            </button>
+            <button
+              className={`px-3 py-1 rounded text-sm ${view === 'building-view' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              onClick={() => setView('building-view')}
+            >
+              Building View
             </button>
           </div>
         </div>
@@ -72,6 +79,12 @@ function App() {
         {view === 'training-data' && (
           <div className="grid grid-cols-1 gap-6">
             <TestControls />
+          </div>
+        )}
+
+        {view === 'building-view' && (
+          <div className="h-[800px] w-full bg-gray-800 rounded-lg overflow-hidden">
+            <BuildingVisualization data={gridData} />
           </div>
         )}
       </div>
