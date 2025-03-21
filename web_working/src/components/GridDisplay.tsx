@@ -116,7 +116,7 @@ export function GridDisplay({ data }: GridDisplayProps) {
   };
 
   return (
-    <div className="relative bg-gray-900 rounded-lg p-4 h-full">
+    <div className="relative bg-gray-900 rounded-lg p-4 h-full w-full">
       {/* Toggle button for 2D/3D visualization */}
       <div className="absolute top-2 right-2 z-10">
         <button
@@ -133,7 +133,7 @@ export function GridDisplay({ data }: GridDisplayProps) {
       
       {/* 2D Grid Visualization */}
       {!show3D && (
-        <div className="grid grid-cols-12 gap-1 aspect-[12/15]">
+        <div className="grid grid-cols-12 gap-1 aspect-[12/15] h-full">
           {data.frame.map((row, i) =>
             row.map((value, j) => (
               <div

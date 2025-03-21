@@ -44,7 +44,7 @@ export function MobilityHealthScore({ currentMetrics }: Props) {
       title="Mobility Health Score"
       subtitle="Overall Assessment"
       icon={<Activity className="w-5 h-5 text-purple-400" />}
-      className="p-0"
+      defaultExpanded={false}
     >
       {/* Risk Level */}
       <div className="text-center mb-2">

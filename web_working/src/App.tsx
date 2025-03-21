@@ -46,12 +46,12 @@ function App() {
         </div>
         
         {view === 'dashboard' && (
-          <div className="grid grid-cols-[1fr_400px] gap-6">
-            <div>
-              <GridDisplay data={gridData} />
-              <div className="-mt-[520px]">
-                <MobilityHealthScore currentMetrics={mobilityMetrics} />
+          <div className="grid grid-cols-[1fr_350px] gap-6">
+            <div className="space-y-4">
+              <div className="h-[750px]">
+                <GridDisplay data={gridData} />
               </div>
+              <MobilityHealthScore currentMetrics={mobilityMetrics} />
             </div>
 
             <div className="space-y-6">
