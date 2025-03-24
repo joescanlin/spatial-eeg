@@ -11,12 +11,13 @@ import WanderingAssessment from './components/WanderingAssessment';
 import { MobilityHealthScore } from './components/MobilityHealthScore';
 import TestControls from './components/TestControls';
 import BuildingVisualization from './components/3d/BuildingVisualization';
+import PortfolioInsights from './components/portfolio/PortfolioInsights';
 import { ErrorBoundary } from 'react-error-boundary';
 
 function App() {
   const { gridData, stats } = useDataStream();
   const { alerts, isLoading: alertsLoading, error: alertsError } = useAlertHistory();
-  const [view, setView] = useState<'dashboard' | 'training-data' | 'building-view'>('training-data');
+  const [view, setView] = useState<'dashboard' | 'training-data' | 'building-view' | 'portfolio-insights'>('training-data');
 
   // Combine metrics for mobility health score
   const mobilityMetrics = {
@@ -49,6 +50,12 @@ function App() {
               onClick={() => setView('building-view')}
             >
               Building View
+            </button>
+            <button
+              className={`px-3 py-1 rounded text-sm ${view === 'portfolio-insights' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              onClick={() => setView('portfolio-insights')}
+            >
+              Portfolio Insights
             </button>
           </div>
         </div>
@@ -87,6 +94,14 @@ function App() {
           <div className="h-[800px] w-full bg-gray-800 rounded-lg overflow-hidden">
             <ErrorBoundary fallback={<div className="p-4 text-white">Error loading 3D visualization. Check console for details.</div>}>
               <BuildingVisualization data={gridData} />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {view === 'portfolio-insights' && (
+          <div className="h-[800px] w-full bg-gray-800 rounded-lg overflow-hidden">
+            <ErrorBoundary fallback={<div className="p-4 text-white">Error loading Portfolio Insights. Check console for details.</div>}>
+              <PortfolioInsights />
             </ErrorBoundary>
           </div>
         )}
