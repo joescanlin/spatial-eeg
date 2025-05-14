@@ -57,3 +57,6 @@ node_modules/
 # Environment variables
 .env
 .env.*
+
+# Test files and databases
+test.db
