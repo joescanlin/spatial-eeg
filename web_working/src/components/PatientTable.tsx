@@ -57,9 +57,10 @@ const mockPatients: Patient[] = [
 
 interface PatientTableProps {
   onSelect: (patient: Patient) => void;
+  onViewReport?: (patientId: number) => void;
 }
 
-export function PatientTable({ onSelect }: PatientTableProps) {
+export function PatientTable({ onSelect, onViewReport }: PatientTableProps) {
   // State for search functionality
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -126,6 +127,7 @@ export function PatientTable({ onSelect }: PatientTableProps) {
               <th scope="col" className="px-6 py-3">Diagnosis</th>
               <th scope="col" className="px-6 py-3">Sessions</th>
               <th scope="col" className="px-6 py-3">Last Visit</th>
+              <th scope="col" className="px-6 py-3">Report</th>
             </tr>
           </thead>
           <tbody>
@@ -142,11 +144,24 @@ export function PatientTable({ onSelect }: PatientTableProps) {
                   <td className="px-6 py-4">{patient.diagnosis || '-'}</td>
                   <td className="px-6 py-4">{patient.sessions_count}</td>
                   <td className="px-6 py-4">{patient.last_visit ? new Date(patient.last_visit).toLocaleDateString() : '-'}</td>
+                  <td className="px-6 py-4">
+                    {onViewReport && (
+                      <button
+                        className="text-blue-400 hover:text-blue-300"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewReport(patient.id);
+                        }}
+                      >
+                        View
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))
             ) : (
               <tr className="bg-gray-700 border-b border-gray-600">
-                <td colSpan={4} className="px-6 py-4 text-center">
+                <td colSpan={5} className="px-6 py-4 text-center">
                   {searchTerm ? 'No matching patients found' : 'No patients available'}
                 </td>
               </tr>

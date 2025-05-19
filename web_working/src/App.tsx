@@ -13,6 +13,7 @@ import PatientTable from './components/PatientTable';
 import PTSessionView from './web/views/PTSessionView';
 import LiveGait from './web/views/LiveGait';
 import PatientDetailView from './web/views/PatientDetailView';
+import PatientReport from './web/views/PatientReport';
 
 // Define the Patient interface
 interface Patient {
@@ -26,7 +27,7 @@ interface Patient {
 
 function App() {
   // Set PT Dashboard as the default view
-  const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait'>('pt-dashboard');
+  const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait' | 'patient-report'>('pt-dashboard');
   
   // Pass current view to useDataStream
   const { gridData, stats } = useDataStream(view);
@@ -46,6 +47,9 @@ function App() {
 
   // State for the selected patient in patient detail view
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  
+  // State for the selected patient ID in patient report view
+  const [reportPatientId, setReportPatientId] = useState<number | null>(null);
 
   // Combine metrics for mobility health score
   const mobilityMetrics = {
@@ -61,10 +65,22 @@ function App() {
     changeView('patient-detail');
   };
 
+  // Handle patient report view
+  const handleViewPatientReport = (patientId: number) => {
+    setReportPatientId(patientId);
+    changeView('patient-report');
+  };
+
   // Handle back button from patient detail view
   const handleBackToPatients = () => {
     changeView('patients');
     setSelectedPatient(null);
+  };
+
+  // Handle back from patient report view
+  const handleBackFromReport = () => {
+    changeView('patients');
+    setReportPatientId(null);
   };
 
   // Save the completed PT Session data as a new session for the patient
@@ -87,6 +103,7 @@ function App() {
         return 'Training';
       case 'patients':
       case 'patient-detail':
+      case 'patient-report':
         return 'Patients';
       case 'pt-session':
         return 'Session';
@@ -128,10 +145,11 @@ function App() {
               Live Gait
             </button>
             <button
-              className={`px-3 py-1 rounded text-sm ${(view === 'patients' || view === 'patient-detail') ? 'bg-blue-600' : 'bg-gray-700'}`}
+              className={`px-3 py-1 rounded text-sm ${(view === 'patients' || view === 'patient-detail' || view === 'patient-report') ? 'bg-blue-600' : 'bg-gray-700'}`}
               onClick={() => {
                 changeView('patients');
                 setSelectedPatient(null);
+                setReportPatientId(null);
               }}
             >
               Patients
@@ -181,6 +199,7 @@ function App() {
             <h2 className="text-2xl font-bold mb-6">Patient Management</h2>
             <PatientTable 
               onSelect={handleSelectPatient}
+              onViewReport={handleViewPatientReport}
             />
           </div>
         )}
@@ -191,6 +210,12 @@ function App() {
               patient={selectedPatient}
               onBack={handleBackToPatients}
             />
+          </div>
+        )}
+        
+        {view === 'patient-report' && reportPatientId && (
+          <div className="w-full">
+            <PatientReport />
           </div>
         )}
         
