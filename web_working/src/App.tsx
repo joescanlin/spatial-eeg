@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GridDisplay } from './components/GridDisplay';
 import { AlertHistoryList } from './components/alerts/AlertHistoryList';
 import { useDataStream } from './hooks/useDataStream';
@@ -32,6 +32,18 @@ function App() {
   const { gridData, stats } = useDataStream(view);
   const { alerts, isLoading: alertsLoading, error: alertsError } = useAlertHistory();
 
+  // Add effect to log view changes for debugging
+  useEffect(() => {
+    console.log(`📱 App: View changed to "${view}"`);
+  }, [view]);
+
+  // Handle view changes with improved logging
+  const changeView = (newView: typeof view) => {
+    console.log(`🔄 App: Changing view from "${view}" to "${newView}"`);
+    // Reset any global state if needed before switching views
+    setView(newView);
+  };
+
   // State for the selected patient in patient detail view
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
 
@@ -46,12 +58,12 @@ function App() {
   // Handle patient selection
   const handleSelectPatient = (patient: Patient) => {
     setSelectedPatient(patient);
-    setView('patient-detail');
+    changeView('patient-detail');
   };
 
   // Handle back button from patient detail view
   const handleBackToPatients = () => {
-    setView('patients');
+    changeView('patients');
     setSelectedPatient(null);
   };
 
@@ -63,7 +75,7 @@ function App() {
     // and then redirect to the patient detail view to see the session
     
     // For now, just simulate completion and redirect to patients view
-    setView('patients');
+    changeView('patients');
   };
 
   // Determine the status banner name based on the active view
@@ -93,32 +105,32 @@ function App() {
           <div className="flex space-x-2">
             <button 
               className={`px-3 py-1 rounded text-sm ${view === 'dashboard' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => setView('dashboard')}
+              onClick={() => changeView('dashboard')}
             >
               Dashboard
             </button>
             <button
               className={`px-3 py-1 rounded text-sm ${view === 'pt-dashboard' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => setView('pt-dashboard')}
+              onClick={() => changeView('pt-dashboard')}
             >
               PT Dashboard
             </button>
             <button
               className={`px-3 py-1 rounded text-sm ${view === 'pt-session' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => setView('pt-session')}
+              onClick={() => changeView('pt-session')}
             >
               PT Session
             </button>
             <button
               className={`px-3 py-1 rounded text-sm ${view === 'live-gait' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => setView('live-gait')}
+              onClick={() => changeView('live-gait')}
             >
               Live Gait
             </button>
             <button
               className={`px-3 py-1 rounded text-sm ${(view === 'patients' || view === 'patient-detail') ? 'bg-blue-600' : 'bg-gray-700'}`}
               onClick={() => {
-                setView('patients');
+                changeView('patients');
                 setSelectedPatient(null);
               }}
             >
@@ -126,7 +138,7 @@ function App() {
             </button>
             <button
               className={`px-3 py-1 rounded text-sm ${view === 'training-data' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => setView('training-data')}
+              onClick={() => changeView('training-data')}
             >
               Training Data
             </button>

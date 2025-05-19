@@ -87,6 +87,16 @@ export default function PTSessionView() {
     endSession();
   };
   
+  // Add debugging for grid data
+  useEffect(() => {
+    console.log("PTSessionView - Grid data updated:", {
+      hasFrame: Boolean(gridData?.frame),
+      frameSize: gridData?.frame?.length,
+      activeSensors: stats?.activeSensors,
+      connectionStatus: stats?.connectionStatus
+    });
+  }, [gridData, stats]);
+  
   // State for collapsing sidebar and metrics panel
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);

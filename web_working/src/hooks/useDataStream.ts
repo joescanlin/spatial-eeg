@@ -62,7 +62,8 @@ export function useDataStream(activeView?: string) {
       return; // Don't set up EventSource
     }
     
-    console.log(`✅ Grid data stream enabled for ${activeView} view`);
+    console.log(`✅ Grid data stream enabled for ${activeView || 'unknown'} view`);
+    console.log(`🔍 Debug: Creating EventSource for ${activeView || 'unknown'} view (${Date.now()})`);
     
     let frameCount = 0;
     let lastFrameTime = Date.now();
@@ -125,15 +126,15 @@ export function useDataStream(activeView?: string) {
     };
 
    eventSource.addEventListener("grid", (event) => {
-     console.log("📨 SSE Message Received:", event.data); // Log raw event
+     console.log(`📨 SSE Message Received for ${activeView || 'unknown'} view:`, event.data.substring(0, 50) + '...'); // Log truncated event
 
       try {
         const data = JSON.parse(event.data);
-        console.log("📦 Parsed SSE data:", data);
+        console.log(`📦 Parsed SSE data for ${activeView || 'unknown'} view, frame present:`, Boolean(data.grid));
 
         if (!data.keepalive) {
           if (data.grid) {
-            console.log("🔲 Processing grid data...");
+            console.log(`🔲 Processing grid data for ${activeView || 'unknown'} view`);
             console.log("🔍 Fall Detection Status:", {
               raw_fall_detected: data.fall_detected,
               parsed_fall_detected: Boolean(data.fall_detected),
