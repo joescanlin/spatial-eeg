@@ -14,6 +14,9 @@ import { CollapsiblePanel } from '../../components/CollapsiblePanel';
 import { StatusBanner } from '../../components/StatusBanner';
 import { GridStats } from '../../types/grid';
 import { usePTStream } from '../../hooks/usePTStream';
+import { useDataStream } from '../../hooks/useDataStream';
+import { BalanceAssessment } from '../../components/BalanceAssessment';
+import { GaitVisualization } from '../../components/GaitVisualization';
 
 // Define the PT metrics interface
 interface PTMetric {
@@ -29,6 +32,8 @@ const MAX_DATA_POINTS = 100;
 export default function LiveGait() {
   // Use the shared PT metrics stream
   const { ptMetrics, isConnected } = usePTStream('live-gait');
+  // Get grid data for balance assessment and gait visualization
+  const { gridData, stats } = useDataStream('live-gait');
   
   // State for metrics history
   const [metricsHistory, setMetricsHistory] = useState<PTMetric[]>([]);
@@ -220,6 +225,12 @@ export default function LiveGait() {
             </div>
           </div>
         </CollapsiblePanel>
+      </div>
+      
+      {/* Balance Assessment and Gait Pattern */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <BalanceAssessment metrics={gridData.balanceMetrics} />
+        <GaitVisualization data={gridData} />
       </div>
       
       {/* Chart panel */}

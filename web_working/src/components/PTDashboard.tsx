@@ -1,7 +1,5 @@
 import React from 'react';
 import { GridDisplay } from './GridDisplay';
-import { BalanceAssessment } from './BalanceAssessment';
-import { GaitVisualization } from './GaitVisualization';
 import { PTExercisePanel } from './PTExercisePanel';
 import { usePTStream } from '../hooks/usePTStream';
 import { useDataStream } from '../hooks/useDataStream';
@@ -51,10 +49,7 @@ export function PTDashboard() {
         <GridDisplay data={gridData} />
       </div>
       
-      <div className="grid grid-cols-2 gap-4">
-        <BalanceAssessment metrics={gridData.balanceMetrics} />
-        <GaitVisualization data={gridData} />
-      </div>
+      {/* The Balance Assessment and Gait Visualization components have been moved to the LiveGait view */}
     </>
   );
 

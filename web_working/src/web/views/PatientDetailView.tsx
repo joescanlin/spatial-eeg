@@ -31,6 +31,30 @@ interface PatientDetailViewProps {
   onBack: () => void;
 }
 
+// Mock sessions for demo purposes
+const mockSessions: Session[] = [
+  {
+    id: 'mock-1',
+    patientId: 1,
+    startTime: '2023-05-10T13:00:00Z',
+    endTime: '2023-05-10T13:45:00Z',
+    duration: 2700,
+    metrics: [],
+    notes: 'Mock session data',
+    selectedMetrics: ['cadence', 'stepLengthSymmetry']
+  },
+  {
+    id: 'mock-2',
+    patientId: 2,
+    startTime: '2023-05-15T09:30:00Z',
+    endTime: '2023-05-15T10:15:00Z',
+    duration: 2700,
+    metrics: [],
+    notes: 'Another mock session',
+    selectedMetrics: ['cadence', 'stanceTime']
+  }
+];
+
 export default function PatientDetailView({ patient, onBack }: PatientDetailViewProps) {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   
@@ -39,29 +63,59 @@ export default function PatientDetailView({ patient, onBack }: PatientDetailView
     queryKey: ['patient-sessions', patient.id],
     queryFn: async () => {
       try {
-        // Try to fetch from the API first (in a real app)
+        console.log('Fetching sessions for patient:', patient.id);
+        
+        // Use localStorage for session data
+        // This is already the fallback approach, but now we're using it directly
+        // since the API endpoint seems to be configured incorrectly
         try {
-          const response = await fetch(`/api/pt-sessions?patientId=${patient.id}`);
-          if (response.ok) {
-            return await response.json();
+          const storedSessions = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
+          console.log('MetricsDebug - Retrieved sessions from localStorage:', storedSessions);
+          console.log('MetricsDebug - Total sessions in localStorage:', storedSessions.length);
+          
+          // Examine each session to check metrics
+          storedSessions.forEach((s: any, i: number) => {
+            console.log(`MetricsDebug - Session ${i} (ID: ${s.id}) metrics:`, {
+              hasMetricsProperty: s.hasOwnProperty('metrics'),
+              metricsType: typeof s.metrics,
+              isArray: Array.isArray(s.metrics),
+              metricsLength: Array.isArray(s.metrics) ? s.metrics.length : 'N/A',
+              patientId: s.patientId
+            });
+          });
+          
+          // Filter sessions for this patient
+          const patientSessions = storedSessions.filter((session: Session) => 
+            session.patientId === patient.id
+          );
+          
+          console.log(`MetricsDebug - After filtering, found ${patientSessions.length} sessions for patient ${patient.id}`);
+          
+          // If we have stored sessions for this patient, return them
+          if (patientSessions.length > 0) {
+            console.log(`Found ${patientSessions.length} sessions for patient ${patient.id} in localStorage`);
+            
+            // Log the full data of the first session to check its structure
+            if (patientSessions.length > 0) {
+              const sessionToCheck = patientSessions[0];
+              console.log('MetricsDebug - First session data:', {
+                id: sessionToCheck.id,
+                patientId: sessionToCheck.patientId,
+                start: sessionToCheck.startTime,
+                end: sessionToCheck.endTime,
+                duration: sessionToCheck.duration,
+                notesLength: sessionToCheck.notes ? sessionToCheck.notes.length : 0,
+                selectedMetricsCount: Array.isArray(sessionToCheck.selectedMetrics) ? sessionToCheck.selectedMetrics.length : 'not array',
+                metricsCount: Array.isArray(sessionToCheck.metrics) ? sessionToCheck.metrics.length : 'not array',
+                metricsData: Array.isArray(sessionToCheck.metrics) && sessionToCheck.metrics.length > 0 ? 
+                  sessionToCheck.metrics[0] : 'no metrics'
+              });
+            }
+            
+            return patientSessions;
           }
-        } catch (apiError) {
-          console.warn('API fetch failed, falling back to localStorage:', apiError);
-        }
-        
-        // Fallback to localStorage for demo purposes
-        const storedSessions = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
-        console.log('Retrieved sessions from localStorage:', storedSessions);
-        
-        // Filter sessions for this patient
-        const patientSessions = storedSessions.filter((session: Session) => 
-          session.patientId === patient.id
-        );
-        
-        // If we have stored sessions for this patient, return them
-        if (patientSessions.length > 0) {
-          console.log(`Found ${patientSessions.length} sessions for patient ${patient.id} in localStorage`);
-          return patientSessions;
+        } catch (storageError) {
+          console.error('Error accessing localStorage:', storageError);
         }
         
         // If no stored sessions, fall back to mock data for demo purposes
@@ -231,119 +285,4 @@ export default function PatientDetailView({ patient, onBack }: PatientDetailView
       )}
     </div>
   );
-}
-
-// Mock session data for demonstration
-const mockSessions: Session[] = [
-  {
-    id: 'sess-1',
-    patientId: 1,
-    startTime: '2025-05-15T09:30:00Z',
-    endTime: '2025-05-15T10:15:00Z',
-    duration: 2700, // 45 minutes
-    notes: 'Patient showed good progress with gait symmetry. Recommended continuing home exercises focusing on balance.',
-    selectedMetrics: ['cadence', 'stepLengthSymmetry', 'stanceTime', 'gaitVariability'],
-    metrics: Array(30).fill(null).map((_, i) => ({
-      timestamp: new Date(new Date('2025-05-15T09:30:00Z').getTime() + i * 60000).toISOString(),
-      duration: i * 60,
-      balanceScore: 80 + Math.random() * 10,
-      stabilityIndex: 0.7 + Math.random() * 0.2,
-      weightShiftQuality: 75 + Math.random() * 10,
-      rangeOfMotion: 80 + Math.random() * 10,
-      cadence: 110 + Math.random() * 10,
-      leftStanceTimeMs: 550 + Math.random() * 50,
-      rightStanceTimeMs: 580 + Math.random() * 50,
-      stanceTimeAsymmetry: 5 + Math.random() * 3,
-      leftStepLength: 25 + Math.random() * 3,
-      rightStepLength: 26 + Math.random() * 3,
-      stepLengthSymmetry: 92 + Math.random() * 5,
-      cadenceVariability: 2 + Math.random() * 1,
-      symmetry: 85 + Math.random() * 10,
-      metricStatus: {
-        cadence: 'normal',
-        stanceTime: 'normal',
-        stepLengthSymmetry: 'normal',
-        gaitVariability: 'normal',
-        balanceScore: 'normal',
-        stabilityIndex: 'normal',
-        weightShiftQuality: 'normal',
-        rangeOfMotion: 'normal',
-        symmetry: 'normal'
-      }
-    }))
-  },
-  {
-    id: 'sess-2',
-    patientId: 1,
-    startTime: '2025-05-10T13:00:00Z',
-    endTime: '2025-05-10T13:45:00Z',
-    duration: 2700, // 45 minutes
-    notes: 'Initial assessment - patient shows asymmetric gait with reduced step length on left side. Starting with basic exercises.',
-    selectedMetrics: ['cadence', 'stepLengthSymmetry', 'stanceTime', 'gaitVariability'],
-    metrics: Array(25).fill(null).map((_, i) => ({
-      timestamp: new Date(new Date('2025-05-10T13:00:00Z').getTime() + i * 60000).toISOString(),
-      duration: i * 60,
-      balanceScore: 75 + Math.random() * 10,
-      stabilityIndex: 0.6 + Math.random() * 0.2,
-      weightShiftQuality: 70 + Math.random() * 10,
-      rangeOfMotion: 75 + Math.random() * 10,
-      cadence: 100 + Math.random() * 10,
-      leftStanceTimeMs: 600 + Math.random() * 50,
-      rightStanceTimeMs: 520 + Math.random() * 50,
-      stanceTimeAsymmetry: 12 + Math.random() * 5,
-      leftStepLength: 22 + Math.random() * 3,
-      rightStepLength: 27 + Math.random() * 3,
-      stepLengthSymmetry: 82 + Math.random() * 5,
-      cadenceVariability: 3.5 + Math.random() * 1,
-      symmetry: 80 + Math.random() * 10,
-      metricStatus: {
-        cadence: 'normal',
-        stanceTime: 'high',
-        stepLengthSymmetry: 'high',
-        gaitVariability: 'normal',
-        balanceScore: 'normal',
-        stabilityIndex: 'normal',
-        weightShiftQuality: 'normal',
-        rangeOfMotion: 'normal',
-        symmetry: 'normal'
-      }
-    }))
-  },
-  {
-    id: 'sess-3',
-    patientId: 2,
-    startTime: '2025-05-14T10:00:00Z',
-    endTime: '2025-05-14T11:00:00Z',
-    duration: 3600, // 60 minutes
-    notes: 'Post-surgery follow-up. Focus on regaining range of motion. Patient reported mild discomfort but completed full session.',
-    selectedMetrics: ['cadence', 'rangeOfMotion', 'balanceScore'],
-    metrics: Array(35).fill(null).map((_, i) => ({
-      timestamp: new Date(new Date('2025-05-14T10:00:00Z').getTime() + i * 60000).toISOString(),
-      duration: i * 60,
-      balanceScore: 70 + Math.random() * 10,
-      stabilityIndex: 0.5 + Math.random() * 0.2,
-      weightShiftQuality: 65 + Math.random() * 10,
-      rangeOfMotion: 65 + Math.random() * 10,
-      cadence: 95 + Math.random() * 10,
-      leftStanceTimeMs: 580 + Math.random() * 50,
-      rightStanceTimeMs: 550 + Math.random() * 50,
-      stanceTimeAsymmetry: 8 + Math.random() * 3,
-      leftStepLength: 24 + Math.random() * 3,
-      rightStepLength: 25 + Math.random() * 3,
-      stepLengthSymmetry: 88 + Math.random() * 5,
-      cadenceVariability: 2.5 + Math.random() * 1,
-      symmetry: 82 + Math.random() * 10,
-      metricStatus: {
-        cadence: 'low',
-        stanceTime: 'normal',
-        stepLengthSymmetry: 'normal',
-        gaitVariability: 'normal',
-        balanceScore: 'normal',
-        stabilityIndex: 'normal',
-        weightShiftQuality: 'normal',
-        rangeOfMotion: 'normal',
-        symmetry: 'normal'
-      }
-    }))
-  }
-]; 
+} 

@@ -37,17 +37,28 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
   // Ensure metrics is a valid array
   const validMetrics = Array.isArray(metrics) ? metrics : [];
   
-  // Add logging to debug metrics data
-  console.log("PTSessionSummary render:", { 
-    metricsCount: validMetrics.length, 
-    isSessionActive, 
-    selectedMetricsCount: selectedMetrics.length,
-    hasMetrics: Boolean(validMetrics.length > 0)
+  // Add debugging to check the input metrics
+  console.log("MetricsDebug - PTSessionSummary input metrics:", {
+    receivedMetricsType: typeof metrics,
+    isInputArray: Array.isArray(metrics),
+    inputLength: Array.isArray(metrics) ? metrics.length : 'not an array',
+    firstItemIfExists: Array.isArray(metrics) && metrics.length > 0 ? typeof metrics[0] : 'none',
+    validMetricsLength: validMetrics.length
   });
-
+  
+  // If metrics is empty, log a more detailed warning
+  if (!Array.isArray(metrics) || metrics.length === 0) {
+    console.warn("MetricsDebug - PTSessionSummary received empty metrics:", {
+      metrics: metrics,
+      selectedMetrics: selectedMetrics,
+      isSessionActive: isSessionActive
+    });
+  }
+  
   // Calculate average metrics
   const averages = useMemo(() => {
     if (validMetrics.length === 0) {
+      console.log("MetricsDebug - No valid metrics to calculate averages");
       return {
         balanceScore: 0,
         stabilityIndex: 0,
@@ -114,12 +125,33 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
     };
   }, [validMetrics]);
   
-  // Transform metrics for chart display
+  // Prepare data for charts
   const chartData = useMemo(() => {
-    return validMetrics.map(m => ({
-      ...m,
-      timeElapsed: `${Math.floor(m.duration / 60)}:${(m.duration % 60).toString().padStart(2, '0')}`
-    }));
+    console.log("MetricsDebug - Preparing chart data with metrics count:", validMetrics.length);
+    
+    // Ensure validMetrics is actually an array again (paranoid check)
+    const metricsArray = Array.isArray(validMetrics) ? validMetrics : [];
+    
+    // If we still have no metrics, log and return empty array
+    if (metricsArray.length === 0) {
+      console.warn("MetricsDebug - No metrics available for chart data");
+      return [];
+    }
+    
+    try {
+      // Format data for time-series chart
+      return metricsArray.map((metric, index) => ({
+        name: index,
+        cadence: metric.cadence || 0,
+        symmetry: metric.symmetry || 0,
+        stepLengthSymmetry: metric.stepLengthSymmetry || 0,
+        balanceScore: metric.balanceScore || 0,
+        time: new Date(metric.timestamp).toISOString().substr(11, 8) // HH:MM:SS
+      }));
+    } catch (error) {
+      console.error("MetricsDebug - Error preparing chart data:", error);
+      return [];
+    }
   }, [validMetrics]);
   
   // Bar chart data for summary - only include selected metrics
@@ -193,191 +225,108 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
       defaultExpanded={true}
     >
       <div className="space-y-4">
-        {validMetrics.length > 0 ? (
-          <>
-            {/* Display message if no metrics are selected */}
-            {selectedMetrics.length === 0 && (
-              <div className="bg-yellow-900/30 border border-yellow-800 text-yellow-200 p-3 rounded-md mb-2">
-                No metrics selected for tracking. Select metrics to see data.
-              </div>
-            )}
-            
-            {/* Summary stats - only show selected metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
-              {selectedMetrics.includes('cadence') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Cadence</div>
-                  <div className={`text-xl font-bold ${getStatusClass('cadence', averages.cadence)}`}>
-                    {averages.cadence}
-                  </div>
-                  <div className="text-xs text-gray-500">steps/min</div>
-                  {/* Thresholds */}
-                  <div className="text-xs text-gray-500 mt-1">
-                    <span className="text-blue-400">&lt; 90</span>
-                    <span className="mx-1">|</span>
-                    <span className="text-orange-400">&gt; 130</span>
-                  </div>
-                </div>
-              )}
-              
-              {selectedMetrics.includes('stanceTime') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Stance Asymmetry</div>
-                  <div className={`text-xl font-bold ${averages.stanceTimeAsymmetry > 10 ? 'text-orange-400' : 'text-green-400'}`}>
-                    {averages.stanceTimeAsymmetry}%
-                  </div>
-                  <div className="text-xs text-gray-500">difference</div>
-                  {/* Thresholds */}
-                  <div className="text-xs text-gray-500 mt-1">
-                    <span className="text-orange-400">&gt; 10%</span> triggers alert
-                  </div>
-                </div>
-              )}
-              
-              {selectedMetrics.includes('stepLengthSymmetry') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Step Length Symmetry</div>
-                  <div className={`text-xl font-bold ${averages.stepLengthSymmetry < 85 ? 'text-orange-400' : 'text-green-400'}`}>
-                    {averages.stepLengthSymmetry}%
-                  </div>
-                  <div className="text-xs text-gray-500">symmetry index</div>
-                  {/* Thresholds */}
-                  <div className="text-xs text-gray-500 mt-1">
-                    <span className="text-orange-400">&lt; 85%</span> triggers alert
-                  </div>
-                </div>
-              )}
-              
-              {selectedMetrics.includes('gaitVariability') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Gait Variability</div>
-                  <div className={`text-xl font-bold ${averages.cadenceVariability > 4 ? 'text-orange-400' : 'text-green-400'}`}>
-                    {averages.cadenceVariability.toFixed(1)}%
-                  </div>
-                  <div className="text-xs text-gray-500">cadence CV</div>
-                  {/* Thresholds */}
-                  <div className="text-xs text-gray-500 mt-1">
-                    <span className="text-orange-400">&gt; 4%</span> triggers alert
-                  </div>
-                </div>
-              )}
-              
-              {selectedMetrics.includes('balanceScore') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Balance Score</div>
-                  <div className="text-xl font-bold text-blue-400">{averages.balanceScore}</div>
-                </div>
-              )}
-              
-              {selectedMetrics.includes('stabilityIndex') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Stability</div>
-                  <div className="text-xl font-bold text-teal-400">{averages.stabilityIndex}</div>
-                </div>
-              )}
-              
-              {selectedMetrics.includes('symmetry') && (
-                <div className="bg-gray-800 p-3 rounded-md text-center">
-                  <div className="text-xs text-gray-400">Symmetry</div>
-                  <div className="text-xl font-bold text-green-400">{Math.round(averages.symmetry)}%</div>
-                </div>
-              )}
+        {/* Data points summary */}
+        <div className="bg-gray-800 p-4 rounded-lg">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium">Session Summary</h3>
+            <div className="text-sm bg-blue-900/50 px-2 py-1 rounded-lg">
+              {validMetrics.length} data points
             </div>
-            
-            {/* Bar chart summary */}
-            {barChartData.length > 0 && (
-              <div className="h-40 mb-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={barChartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#374151" />
-                    <XAxis dataKey="name" stroke="#6B7280" />
-                    <YAxis domain={[0, 140]} stroke="#6B7280" />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#1F2937', borderColor: '#4B5563' }}
-                      formatter={(value, name, props) => {
-                        const unit = props.payload.unit || '';
-                        return [`${value} ${unit}`, name];
-                      }}
-                    />
-                    <Bar dataKey="value" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            
-            {/* Line chart of metrics over time */}
-            <div className="h-60">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis 
-                    dataKey="timeElapsed" 
-                    stroke="#6B7280"
-                    label={{ value: 'Time Elapsed (mm:ss)', position: 'insideBottom', offset: -5 }}
-                  />
-                  <YAxis stroke="#6B7280" domain={[0, 140]} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#1F2937', borderColor: '#4B5563' }}
-                  />
-                  <Legend />
-                  {selectedMetrics.includes('balanceScore') && (
-                    <Line type="monotone" dataKey="balanceScore" name="Balance" stroke="#3B82F6" />
-                  )}
-                  {selectedMetrics.includes('weightShiftQuality') && (
-                    <Line type="monotone" dataKey="weightShiftQuality" name="Weight Shift" stroke="#FBBF24" />
-                  )}
-                  {selectedMetrics.includes('cadence') && (
-                    <Line type="monotone" dataKey="cadence" name="Cadence" stroke="#EC4899" />
-                  )}
-                  {selectedMetrics.includes('stanceTime') && (
-                    <Line type="monotone" dataKey="stanceTimeAsymmetry" name="Stance Asymm" stroke="#F97316" />
-                  )}
-                  {selectedMetrics.includes('stepLengthSymmetry') && (
-                    <Line type="monotone" dataKey="stepLengthSymmetry" name="Step Symm" stroke="#22C55E" />
-                  )}
-                  {selectedMetrics.includes('gaitVariability') && (
-                    <Line type="monotone" dataKey="cadenceVariability" name="Gait Var" stroke="#8B5CF6" />
-                  )}
-                  {selectedMetrics.includes('symmetry') && (
-                    <Line type="monotone" dataKey="symmetry" name="Symmetry" stroke="#6EE7B7" />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            
-            {/* Selected metrics explanation */}
-            <div className="bg-gray-800 p-3 rounded-md">
-              <h3 className="text-sm font-medium mb-2">Selected Metrics</h3>
-              <div className="space-y-2">
-                {selectedMetrics.map(metricId => {
-                  const metric = availableMetrics.find(m => m.id === metricId);
-                  if (!metric) return null;
-                  
-                  return (
-                    <div key={metricId} className="text-sm">
-                      <div className="font-medium">{metric.name}</div>
-                      <div className="text-gray-400 text-xs">{metric.clinicalValue}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="text-center py-8 text-gray-400">
-            {isSessionActive ? 
-              <div>
-                <p>Recording session metrics. Data will appear here shortly...</p>
-                <div className="mt-4 flex justify-center">
-                  <div className="animate-pulse bg-purple-500 h-2 w-2 rounded-full mx-1"></div>
-                  <div className="animate-pulse bg-purple-500 h-2 w-2 rounded-full mx-1" style={{animationDelay: '0.2s'}}></div>
-                  <div className="animate-pulse bg-purple-500 h-2 w-2 rounded-full mx-1" style={{animationDelay: '0.4s'}}></div>
-                </div>
-              </div> : 
-              "No session data available. Start a session to begin recording metrics."
-            }
           </div>
-        )}
+          
+          {validMetrics.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <p>No metric data available for this session.</p>
+              <p className="text-sm mt-2">This could happen if the session didn't record any metrics or if there was an issue with data saving.</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                {selectedMetrics.includes('cadence') && (
+                  <div className="bg-gray-700 p-3 rounded-lg">
+                    <p className="text-sm text-gray-400">Avg. Cadence</p>
+                    <p className="text-xl font-bold">{Math.round(averages.cadence)} <span className="text-sm text-gray-400">steps/min</span></p>
+                  </div>
+                )}
+                
+                {selectedMetrics.includes('stepLengthSymmetry') && (
+                  <div className="bg-gray-700 p-3 rounded-lg">
+                    <p className="text-sm text-gray-400">Step-Length Symmetry</p>
+                    <p className="text-xl font-bold">{Math.round(averages.stepLengthSymmetry)}%</p>
+                  </div>
+                )}
+                
+                {selectedMetrics.includes('stanceTime') && (
+                  <div className="bg-gray-700 p-3 rounded-lg">
+                    <p className="text-sm text-gray-400">Stance Time Asymmetry</p>
+                    <p className="text-xl font-bold">{Math.round(averages.stanceTimeAsymmetry)}%</p>
+                  </div>
+                )}
+                
+                {selectedMetrics.includes('gaitVariability') && (
+                  <div className="bg-gray-700 p-3 rounded-lg">
+                    <p className="text-sm text-gray-400">CV of Cadence</p>
+                    <p className="text-xl font-bold">{averages.cadenceVariability.toFixed(1)}%</p>
+                  </div>
+                )}
+              </div>
+              
+              {/* Chart */}
+              {chartData.length > 0 && (
+                <div className="h-60">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={chartData}
+                      margin={{
+                        top: 5,
+                        right: 30,
+                        left: 20,
+                        bottom: 5,
+                      }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis 
+                        dataKey="name" 
+                        stroke="#6B7280"
+                        tickFormatter={(val) => chartData[val]?.time || ''}
+                      />
+                      <YAxis stroke="#6B7280" />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#1F2937', borderColor: '#4B5563' }}
+                      />
+                      <Legend />
+                      {selectedMetrics.includes('cadence') && (
+                        <Line 
+                          type="monotone" 
+                          dataKey="cadence" 
+                          name="Cadence" 
+                          stroke="#3B82F6" 
+                          activeDot={{ r: 8 }} 
+                        />
+                      )}
+                      {selectedMetrics.includes('stepLengthSymmetry') && (
+                        <Line 
+                          type="monotone" 
+                          dataKey="stepLengthSymmetry" 
+                          name="Step-Length Symmetry" 
+                          stroke="#10B981" 
+                        />
+                      )}
+                      {selectedMetrics.includes('balanceScore') && (
+                        <Line 
+                          type="monotone" 
+                          dataKey="balanceScore" 
+                          name="Balance Score" 
+                          stroke="#F59E0B" 
+                        />
+                      )}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </CollapsiblePanel>
   );

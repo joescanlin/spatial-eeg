@@ -571,6 +571,9 @@ export function usePTSession() {
         };
         
         console.log("Saving session data:", sessionData);
+        console.log("MetricsDebug - original metrics count:", sessionMetrics.length);
+        console.log("MetricsDebug - first 3 metrics:", sessionMetrics.slice(0, 3));
+        console.log("MetricsDebug - sessionData metrics count:", sessionData.metrics.length);
         
         // Update session in API
         const response = await fetch(`/api/pt-sessions/${sessionId}`, {
@@ -590,21 +593,50 @@ export function usePTSession() {
         if (!response.ok) {
           console.warn('API error, falling back to local storage:', response.statusText);
           
-          // Store session in localStorage as a fallback for demo purposes
+          // Try to save to localStorage as a fallback
           try {
+            // Create a safe copy of metrics
+            const safeMetrics = sessionMetrics.map(metric => ({
+              timestamp: metric.timestamp,
+              duration: metric.duration,
+              balanceScore: metric.balanceScore,
+              stabilityIndex: metric.stabilityIndex,
+              weightShiftQuality: metric.weightShiftQuality,
+              rangeOfMotion: metric.rangeOfMotion,
+              cadence: metric.cadence,
+              leftStanceTimeMs: metric.leftStanceTimeMs,
+              rightStanceTimeMs: metric.rightStanceTimeMs,
+              stanceTimeAsymmetry: metric.stanceTimeAsymmetry,
+              leftStepLength: metric.leftStepLength,
+              rightStepLength: metric.rightStepLength,
+              stepLengthSymmetry: metric.stepLengthSymmetry,
+              cadenceVariability: metric.cadenceVariability,
+              symmetry: metric.symmetry,
+              // Ensure metricStatus is safely copied if it exists
+              metricStatus: metric.metricStatus ? { ...metric.metricStatus } : undefined
+            }));
+            
+            const sessionData = {
+              id: sessionId,
+              patientId: selectedPatient.id,
+              startTime: sessionStart.toISOString(),
+              endTime: new Date().toISOString(),
+              duration: sessionDuration,
+              metrics: safeMetrics, // Use the safely copied metrics
+              notes: sessionNotes,
+              selectedMetrics: [...selectedMetrics], // Clone the selected metrics array
+              savedAt: new Date().toISOString(),
+              isLocalOnly: true
+            };
+            
             // Get existing sessions
             const existingSessions = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
-            
-            // Add new session
-            existingSessions.push({
-              ...sessionData,
-              id: sessionId,
-              savedAt: new Date().toISOString()
-            });
-            
-            // Save back to localStorage
+            existingSessions.push(sessionData);
             localStorage.setItem('pt-sessions', JSON.stringify(existingSessions));
-            console.log('Session saved to localStorage as fallback');
+            console.log('Session saved to localStorage as fallback after error');
+            
+            // Show warning alert
+            window.alert("Couldn't connect to server. Session has been saved locally.");
           } catch (storageError) {
             console.error('Error saving to localStorage:', storageError);
           }
@@ -617,19 +649,61 @@ export function usePTSession() {
             const existingSessions = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
             
             // Create a complete session object with metrics
+            // First create a safe copy of the metrics array by manually extracting the essential properties
+            const safeMetrics = sessionMetrics.map(metric => ({
+              timestamp: metric.timestamp,
+              duration: metric.duration,
+              balanceScore: metric.balanceScore,
+              stabilityIndex: metric.stabilityIndex,
+              weightShiftQuality: metric.weightShiftQuality,
+              rangeOfMotion: metric.rangeOfMotion,
+              cadence: metric.cadence,
+              leftStanceTimeMs: metric.leftStanceTimeMs,
+              rightStanceTimeMs: metric.rightStanceTimeMs,
+              stanceTimeAsymmetry: metric.stanceTimeAsymmetry,
+              leftStepLength: metric.leftStepLength,
+              rightStepLength: metric.rightStepLength,
+              stepLengthSymmetry: metric.stepLengthSymmetry,
+              cadenceVariability: metric.cadenceVariability,
+              symmetry: metric.symmetry,
+              // Ensure metricStatus is safely copied if it exists
+              metricStatus: metric.metricStatus ? { ...metric.metricStatus } : undefined
+            }));
+            
             const completeSession = {
-              ...sessionData,
+              patientId: selectedPatient.id,
+              startTime: sessionStart.toISOString(),
+              endTime: endTime.toISOString(),
+              duration: durationInSeconds,
+              metrics: safeMetrics, // Use the safely copied metrics
+              notes: sessionNotes,
+              selectedMetrics: [...selectedMetrics], // Clone the selected metrics array
               id: sessionId,
-              savedAt: new Date().toISOString(),
-              metrics: [...sessionMetrics] // Ensure metrics are included and cloned
+              savedAt: new Date().toISOString()
             };
             
-            console.log('Saving complete session to localStorage with metrics count:', 
+            console.log('MetricsDebug - Saving complete session to localStorage with metrics count:', 
                         Array.isArray(completeSession.metrics) ? completeSession.metrics.length : 0);
+            console.log('MetricsDebug - completeSession typeof metrics:', typeof completeSession.metrics);
+            console.log('MetricsDebug - completeSession metrics is array:', Array.isArray(completeSession.metrics));
+            
+            // Clone again to be sure
+            const verifiedSession = {
+              ...completeSession,
+              metrics: Array.isArray(completeSession.metrics) ? [...completeSession.metrics] : []
+            };
+            
+            console.log('MetricsDebug - Final verification - metrics count:', verifiedSession.metrics.length);
             
             // Add to existing sessions
-            existingSessions.push(completeSession);
+            existingSessions.push(verifiedSession);
             localStorage.setItem('pt-sessions', JSON.stringify(existingSessions));
+            
+            // After saving, verify what was actually stored
+            const checkStorage = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
+            const lastSession = checkStorage[checkStorage.length - 1];
+            console.log('MetricsDebug - After saving, last session metrics count:', 
+                        lastSession ? (Array.isArray(lastSession.metrics) ? lastSession.metrics.length : 'not array') : 'none');
             
             console.log('Session with metrics saved to localStorage');
           } catch (storageError) {
@@ -679,21 +753,39 @@ export function usePTSession() {
         
         // Try to save to localStorage as a fallback
         try {
+          // Create a safe copy of metrics
+          const safeMetrics = sessionMetrics.map(metric => ({
+            timestamp: metric.timestamp,
+            duration: metric.duration,
+            balanceScore: metric.balanceScore,
+            stabilityIndex: metric.stabilityIndex,
+            weightShiftQuality: metric.weightShiftQuality,
+            rangeOfMotion: metric.rangeOfMotion,
+            cadence: metric.cadence,
+            leftStanceTimeMs: metric.leftStanceTimeMs,
+            rightStanceTimeMs: metric.rightStanceTimeMs,
+            stanceTimeAsymmetry: metric.stanceTimeAsymmetry,
+            leftStepLength: metric.leftStepLength,
+            rightStepLength: metric.rightStepLength,
+            stepLengthSymmetry: metric.stepLengthSymmetry,
+            cadenceVariability: metric.cadenceVariability,
+            symmetry: metric.symmetry,
+            // Ensure metricStatus is safely copied if it exists
+            metricStatus: metric.metricStatus ? { ...metric.metricStatus } : undefined
+          }));
+          
           const sessionData = {
             id: sessionId,
             patientId: selectedPatient.id,
             startTime: sessionStart.toISOString(),
             endTime: new Date().toISOString(),
             duration: sessionDuration,
-            metrics: [...sessionMetrics], // Make sure to clone the array
+            metrics: safeMetrics, // Use the safely copied metrics
             notes: sessionNotes,
-            selectedMetrics: selectedMetrics,
+            selectedMetrics: [...selectedMetrics], // Clone the selected metrics array
             savedAt: new Date().toISOString(),
             isLocalOnly: true
           };
-          
-          // Log for debugging
-          console.log('Saving session with metrics count:', sessionMetrics.length);
           
           // Get existing sessions
           const existingSessions = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
