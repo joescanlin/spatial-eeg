@@ -28,20 +28,6 @@ export default function PTSessionView() {
     stopExercise
   } = usePTStream('pt-session');
 
-  const balanceTraining = useBalanceTraining(selectedPatient?.id ?? null);
-
-  const handleStartExercise = (type: string) => {
-    startExercise(type);
-    if (type === 'balance') {
-      balanceTraining.start();
-    }
-  };
-
-  const handleStopExercise = () => {
-    stopExercise();
-    balanceTraining.stop();
-  };
-  
   const {
     selectedPatient,
     isSessionActive,
@@ -63,6 +49,20 @@ export default function PTSessionView() {
     stepLengthSymmetryData,
     cadenceVariabilityData
   } = usePTSession();
+  
+  const balanceTraining = useBalanceTraining(selectedPatient?.id ?? null);
+
+  const handleStartExercise = (type: string) => {
+    startExercise(type);
+    if (type === 'balance') {
+      balanceTraining.start();
+    }
+  };
+
+  const handleStopExercise = () => {
+    stopExercise();
+    balanceTraining.stop();
+  };
   
   // Add logging to track session state
   useEffect(() => {
