@@ -4,12 +4,14 @@ import Dashboard from './views/Dashboard';
 import LiveGait from './views/LiveGait';
 import Progress from './views/Progress';
 import PlanWizard from './views/PlanWizard';
+import PatientReport from './views/PatientReport';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Dashboard /> },
   { path: '/live', element: <LiveGait /> },
   { path: '/progress', element: <Progress /> },
   { path: '/plan', element: <PlanWizard /> },
+  { path: '/patients/:id/report', element: <PatientReport /> },
 ]);
 
 export default router; 
