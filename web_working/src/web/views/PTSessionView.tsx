@@ -1,0 +1,426 @@
+import React, { useState, useEffect } from 'react';
+import PTSessionControl from '../../components/PTSessionControl';
+import PatientSelectionModal from '../../components/PatientSelectionModal';
+import PTSessionNotes from '../../components/PTSessionNotes';
+import PTSessionSummary from '../../components/PTSessionSummary';
+import PTMetricSelector from '../../components/PTMetricSelector';
+import CadenceMetric from '../../components/metrics/CadenceMetric';
+import StanceTimeMetric from '../../components/metrics/StanceTimeMetric';
+import StepLengthSymmetryMetric from '../../components/metrics/StepLengthSymmetryMetric';
+import GaitVariabilityMetric from '../../components/metrics/GaitVariabilityMetric';
+import { GridDisplay } from '../../components/GridDisplay';
+import { usePTSession } from '../../hooks/usePTSession';
+import { useDataStream } from '../../hooks/useDataStream';
+import { PTExercisePanel } from '../../components/PTExercisePanel';
+import { usePTStream } from '../../hooks/usePTStream';
+import { ChevronRight, ChevronLeft, LayoutGrid } from 'lucide-react';
+
+export default function PTSessionView() {
+  const { gridData, stats } = useDataStream();
+  const { 
+    ptMetrics, 
+    isExerciseActive, 
+    exerciseType, 
+    isConnected,
+    startExercise, 
+    stopExercise 
+  } = usePTStream();
+  
+  const {
+    selectedPatient,
+    isSessionActive,
+    sessionDuration,
+    sessionNotes,
+    sessionMetrics,
+    selectedMetrics,
+    isModalOpen,
+    isLoading,
+    error,
+    selectPatient,
+    openPatientSelection,
+    closePatientSelection,
+    startSession,
+    endSession,
+    updateSessionNotes,
+    toggleMetric,
+    stanceTimeData,
+    stepLengthSymmetryData,
+    cadenceVariabilityData
+  } = usePTSession();
+  
+  // Add logging to track session state
+  useEffect(() => {
+    console.log("PTSessionView: isSessionActive changed:", isSessionActive);
+    console.log("PTSessionView: sessionMetrics count:", sessionMetrics.length);
+  }, [isSessionActive, sessionMetrics.length]);
+  
+  // Handle "Select Patient" button click
+  const handlePatientButtonClick = () => {
+    console.log("PTSessionView: Select patient button clicked");
+    openPatientSelection();
+  };
+  
+  // Get latest cadence value and status
+  const getLatestCadenceData = () => {
+    if (sessionMetrics.length === 0) {
+      return { value: 0, status: 'none' as const };
+    }
+    
+    const lastMetric = sessionMetrics[sessionMetrics.length - 1];
+    return {
+      value: lastMetric.cadence,
+      status: lastMetric.metricStatus?.cadence || 'none' as const
+    };
+  };
+  
+  const cadenceData = getLatestCadenceData();
+  
+  // Handle session start with additional logging
+  const handleStartSession = () => {
+    console.log("PTSessionView: Start session initiated");
+    startSession();
+  };
+  
+  // Handle session end with additional logging
+  const handleEndSession = () => {
+    console.log("PTSessionView: End session initiated");
+    endSession();
+  };
+  
+  // State for collapsing sidebar and metrics panel
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  
+  // State for expanded metric (for mobile view)
+  const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
+  
+  // Toggle expanded metric
+  const toggleExpandMetric = (metricId: string) => {
+    if (expandedMetric === metricId) {
+      setExpandedMetric(null);
+    } else {
+      setExpandedMetric(metricId);
+    }
+  };
+  
+  // State for full-screen metric selector
+  const [metricSelectorFullscreen, setMetricSelectorFullscreen] = useState(false);
+
+  // Debug output
+  console.log("PTSessionView rendering:", { 
+    isSessionActive, 
+    sessionDuration, 
+    metricsCount: sessionMetrics.length,
+    patient: selectedPatient ? `${selectedPatient.first_name} ${selectedPatient.last_name}` : "none"
+  });
+
+  return (
+    <div className="p-6 space-y-6 bg-gray-900 min-h-screen">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-white">PT Session Management</h1>
+      </div>
+      
+      {error && (
+        <div className="bg-red-900/30 border border-red-800 text-red-200 px-4 py-3 rounded-lg">
+          <div className="font-bold">Error</div>
+          <div>{error}</div>
+        </div>
+      )}
+      
+      {/* Session status banner */}
+      {isSessionActive && selectedPatient && (
+        <div className="bg-blue-900/30 border border-blue-800 text-blue-200 px-4 py-3 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-bold">Active Session with {selectedPatient.first_name} {selectedPatient.last_name}</span>
+              <span className="ml-4 text-sm">
+                Duration: {Math.floor(sessionDuration / 60)}:{(sessionDuration % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+            <div className="animate-pulse bg-blue-500 h-2 w-2 rounded-full"></div>
+          </div>
+        </div>
+      )}
+      
+      {/* Loading indicator */}
+      {isLoading && (
+        <div className="bg-gray-800 p-4 rounded-lg">
+          <div className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+            <span className="ml-3 text-gray-300">Processing...</span>
+          </div>
+        </div>
+      )}
+      
+      {/* Three-column layout */}
+      <div className="flex">
+        {/* Left Sidebar - can be collapsed */}
+        <div className={`${leftSidebarCollapsed ? 'w-12' : 'w-80'} transition-all duration-300 flex-shrink-0 relative`}>
+          {/* Toggle button */}
+          <button 
+            className="absolute -right-3 top-1/2 transform -translate-y-1/2 bg-gray-700 rounded-full p-1 z-10"
+            onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
+          >
+            {leftSidebarCollapsed ? 
+              <ChevronRight className="w-4 h-4 text-gray-300" /> : 
+              <ChevronLeft className="w-4 h-4 text-gray-300" />
+            }
+          </button>
+          
+          {/* Sidebar content */}
+          <div className={`space-y-4 pr-4 ${leftSidebarCollapsed ? 'opacity-0 invisible' : 'opacity-100 visible'} transition-opacity duration-300`}>
+            <PTSessionControl
+              selectedPatient={selectedPatient}
+              isSessionActive={isSessionActive}
+              sessionDuration={sessionDuration}
+              onSelectPatient={handlePatientButtonClick}
+              onStartSession={handleStartSession}
+              onEndSession={handleEndSession}
+            />
+            
+            {/* Metric Selector with fullscreen capability */}
+            <div className="relative">
+              <div 
+                className="cursor-pointer" 
+                onClick={() => setMetricSelectorFullscreen(true)}
+              >
+                <PTMetricSelector
+                  selectedMetrics={selectedMetrics}
+                  onToggleMetric={toggleMetric}
+                  isSessionActive={isSessionActive}
+                />
+              </div>
+              
+              {/* Button to expand to fullscreen */}
+              <button 
+                className="absolute top-3 right-3 bg-gray-700 hover:bg-gray-600 rounded p-1"
+                onClick={() => setMetricSelectorFullscreen(true)}
+              >
+                <LayoutGrid className="w-4 h-4 text-gray-300" />
+              </button>
+            </div>
+            
+            <PTExercisePanel
+              metrics={ptMetrics}
+              isActive={isExerciseActive}
+              exerciseType={exerciseType}
+              onStart={startExercise}
+              onStop={stopExercise}
+              isConnected={isConnected}
+            />
+            
+            <PTSessionNotes
+              value={sessionNotes}
+              onChange={updateSessionNotes}
+              isSessionActive={isSessionActive}
+              disabled={isLoading}
+            />
+          </div>
+        </div>
+        
+        {/* Main content - grid display */}
+        <div className={`flex-grow transition-all duration-300 ${rightPanelCollapsed ? 'mr-0' : 'mr-0 lg:mr-80'}`}>
+          <div className="h-[700px]">
+            <GridDisplay data={gridData} />
+          </div>
+          
+          {/* Session metrics summary - below grid */}
+          <div className="mt-6">
+            <PTSessionSummary
+              metrics={sessionMetrics}
+              isSessionActive={isSessionActive}
+              selectedMetrics={selectedMetrics}
+            />
+          </div>
+        </div>
+        
+        {/* Right Panel - Metrics display (hidden on mobile) */}
+        <div className={`hidden lg:block fixed right-0 top-0 bottom-0 ${rightPanelCollapsed ? 'translate-x-full' : 'translate-x-0'} w-80 bg-gray-900 p-6 pt-24 overflow-y-auto transition-transform duration-300 shadow-lg border-l border-gray-800 z-20`}>
+          {/* Toggle button */}
+          <button 
+            className="absolute left-3 top-1/2 transform -translate-y-1/2 bg-gray-700 rounded-full p-1"
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+          >
+            {rightPanelCollapsed ? 
+              <ChevronLeft className="w-4 h-4 text-gray-300" /> : 
+              <ChevronRight className="w-4 h-4 text-gray-300" />
+            }
+          </button>
+          
+          {/* Metrics components */}
+          <div className="space-y-6">
+            {selectedMetrics.includes('cadence') && (
+              <CadenceMetric 
+                value={cadenceData.value}
+                status={cadenceData.status}
+                isSessionActive={isSessionActive}
+              />
+            )}
+            
+            {selectedMetrics.includes('stanceTime') && (
+              <StanceTimeMetric 
+                data={stanceTimeData}
+                isSessionActive={isSessionActive}
+              />
+            )}
+            
+            {selectedMetrics.includes('stepLengthSymmetry') && (
+              <StepLengthSymmetryMetric 
+                data={stepLengthSymmetryData}
+                isSessionActive={isSessionActive}
+              />
+            )}
+            
+            {selectedMetrics.includes('gaitVariability') && (
+              <GaitVariabilityMetric 
+                data={cadenceVariabilityData}
+                isSessionActive={isSessionActive}
+              />
+            )}
+          </div>
+        </div>
+        
+        {/* Mobile metrics panel - Show as expandable cards below grid */}
+        <div className="lg:hidden mt-6 space-y-4">
+          {selectedMetrics.includes('cadence') && (
+            <div className={expandedMetric === 'cadence' ? 'block' : 'overflow-hidden max-h-20'}>
+              <div 
+                className="cursor-pointer bg-gray-800 rounded-lg p-4"
+                onClick={() => toggleExpandMetric('cadence')}
+              >
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium">Cadence</h3>
+                  <span className="text-lg font-bold">{Math.round(cadenceData.value)} steps/min</span>
+                </div>
+                
+                {expandedMetric === 'cadence' && (
+                  <div className="mt-4">
+                    <CadenceMetric 
+                      value={cadenceData.value}
+                      status={cadenceData.status}
+                      isSessionActive={isSessionActive}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {selectedMetrics.includes('stanceTime') && (
+            <div className={expandedMetric === 'stanceTime' ? 'block' : 'overflow-hidden max-h-20'}>
+              <div 
+                className="cursor-pointer bg-gray-800 rounded-lg p-4"
+                onClick={() => toggleExpandMetric('stanceTime')}
+              >
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium">Step/Stance Time</h3>
+                  <span className="text-lg font-bold">{Math.round(stanceTimeData.asymmetryPercent)}% Asymmetry</span>
+                </div>
+                
+                {expandedMetric === 'stanceTime' && (
+                  <div className="mt-4">
+                    <StanceTimeMetric 
+                      data={stanceTimeData}
+                      isSessionActive={isSessionActive}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {selectedMetrics.includes('stepLengthSymmetry') && (
+            <div className={expandedMetric === 'stepLengthSymmetry' ? 'block' : 'overflow-hidden max-h-20'}>
+              <div 
+                className="cursor-pointer bg-gray-800 rounded-lg p-4"
+                onClick={() => toggleExpandMetric('stepLengthSymmetry')}
+              >
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium">Step-Length Symmetry</h3>
+                  <span className="text-lg font-bold">{Math.round(stepLengthSymmetryData.symmetryPercent)}%</span>
+                </div>
+                
+                {expandedMetric === 'stepLengthSymmetry' && (
+                  <div className="mt-4">
+                    <StepLengthSymmetryMetric 
+                      data={stepLengthSymmetryData}
+                      isSessionActive={isSessionActive}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {selectedMetrics.includes('gaitVariability') && (
+            <div className={expandedMetric === 'gaitVariability' ? 'block' : 'overflow-hidden max-h-20'}>
+              <div 
+                className="cursor-pointer bg-gray-800 rounded-lg p-4"
+                onClick={() => toggleExpandMetric('gaitVariability')}
+              >
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium">Gait Variability</h3>
+                  <span className="text-lg font-bold">
+                    {cadenceVariabilityData.isReliable ? 
+                      `${cadenceVariabilityData.coefficientOfVariation.toFixed(1)}% CV` : 
+                      "Collecting data..."}
+                  </span>
+                </div>
+                
+                {expandedMetric === 'gaitVariability' && (
+                  <div className="mt-4">
+                    <GaitVariabilityMetric 
+                      data={cadenceVariabilityData}
+                      isSessionActive={isSessionActive}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      
+      {/* Patient selection modal */}
+      <PatientSelectionModal
+        isOpen={isModalOpen}
+        onClose={closePatientSelection}
+        onSelectPatient={selectPatient}
+      />
+      
+      {/* Fullscreen metric selector modal */}
+      {metricSelectorFullscreen && (
+        <div className="fixed inset-0 bg-gray-900/95 z-50 p-6 overflow-y-auto">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold">Metric Selection</h2>
+              <button 
+                className="bg-gray-800 hover:bg-gray-700 rounded-full p-2"
+                onClick={() => setMetricSelectorFullscreen(false)}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <PTMetricSelector
+              selectedMetrics={selectedMetrics}
+              onToggleMetric={toggleMetric}
+              isSessionActive={isSessionActive}
+            />
+            
+            <div className="mt-6 flex justify-end">
+              <button 
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-white"
+                onClick={() => setMetricSelectorFullscreen(false)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+} 

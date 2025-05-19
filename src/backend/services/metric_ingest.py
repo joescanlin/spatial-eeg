@@ -32,11 +32,22 @@ class DBMetricPersister:
         self.client = mqtt_client if mqtt_client else create_mqtt_client("pt_metric_persister")
         self.running = False
         self.topic = None
+        self.message_handlers = []
         
         # Set up MQTT callbacks
         self.client.on_message = self._on_mqtt_message
         self.client.on_connect = self._on_mqtt_connect
         self.client.on_disconnect = self._on_mqtt_disconnect
+    
+    def register_message_handler(self, handler: Callable[[str, Dict[str, Any]], None]):
+        """
+        Register a callback to receive messages from the MQTT broker.
+        
+        Args:
+            handler: Function that will be called with (topic, payload) as arguments
+        """
+        self.message_handlers.append(handler)
+        logger.info(f"Registered new message handler, total handlers: {len(self.message_handlers)}")
     
     def _on_mqtt_connect(self, client, userdata, flags, rc):
         """Callback for when the client connects to the broker."""
@@ -70,6 +81,14 @@ class DBMetricPersister:
             
             # Convert payload to string
             payload_str = msg.payload.decode('utf-8')
+            
+            # Pass to custom message handlers
+            try:
+                payload_data = json.loads(payload_str)
+                for handler in self.message_handlers:
+                    handler(msg.topic, payload_data)
+            except json.JSONDecodeError:
+                logger.warning(f"Received non-JSON payload: {payload_str}")
             
             # Schedule the async on_message method
             asyncio.create_task(self.on_message(msg.topic, payload_str))

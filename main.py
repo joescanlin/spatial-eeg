@@ -1,9 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 import logging
 import asyncio
+import json
+from fastapi.responses import StreamingResponse
+import queue
+import time
 
 from src.backend.db.session import AsyncSessionLocal
 from src.backend.db import models
@@ -64,8 +68,96 @@ async def root():
 async def health_check():
     return {"status": "ok"}
 
-# Global variable to store the metric persister
+# Create a queue for metrics events
+metrics_queue = queue.Queue()
+
+# Metric persister class needs access to the queue
+# The line below is inserted right before startup_event function
 metric_persister = None
+
+# Create a custom message handler that we can pass to the metric persister
+def handle_metric_message(topic, payload):
+    """Handle metric messages by adding them to the queue for SSE streaming."""
+    try:
+        # Add the message to the queue for SSE streaming
+        metrics_queue.put({"event": "metrics", "data": payload})
+        logger.debug(f"Added metric to queue: {topic}")
+    except Exception as e:
+        logger.error(f"Error handling metric message: {str(e)}")
+
+# Add OPTIONS method to handle preflight CORS requests
+@app.options("/api/metrics-stream")
+async def metrics_stream_options():
+    """Handle OPTIONS requests for CORS preflight."""
+    return {}
+
+@app.get("/api/metrics-stream")
+async def metrics_stream(request: Request):
+    """SSE endpoint for streaming metrics data to the frontend."""
+    # If it's a HEAD request, return headers only
+    if request.method == "HEAD":
+        return StreamingResponse(
+            content=iter([b""]),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            },
+        )
+    
+    async def event_generator():
+        try:
+            logger.info("Client connected to metrics stream")
+            # Keep the connection alive
+            while True:
+                # Check if the client has disconnected
+                if await request.is_disconnected():
+                    logger.info("Client disconnected from metrics stream")
+                    break
+                
+                try:
+                    # Try to get a message from the queue with a timeout
+                    message = metrics_queue.get(timeout=1)
+                    # Format it as a server-sent event
+                    event_data = f"event: {message['event']}\ndata: {json.dumps(message['data'])}\n\n"
+                    yield event_data
+                except queue.Empty:
+                    # If no messages, send a keepalive event
+                    yield f"event: keepalive\ndata: {json.dumps({'timestamp': time.time()})}\n\n"
+                    await asyncio.sleep(1)
+                    
+        except Exception as e:
+            logger.error(f"Error in metrics stream: {str(e)}")
+            # Close the connection
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        },
+    )
+
+# Add a test endpoint to simulate sensor data
+@app.post("/api/test-metrics")
+async def test_metrics(data: dict):
+    """Test endpoint to manually send metrics to connected clients."""
+    try:
+        logger.info(f"Sending test metrics: {data}")
+        # Add the message to the queue
+        metrics_queue.put({"event": "metrics", "data": data})
+        return {"status": "success", "message": "Test metrics sent"}
+    except Exception as e:
+        logger.error(f"Error sending test metrics: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 # Startup event
 @app.on_event("startup")
@@ -78,11 +170,14 @@ async def startup_event():
         # Create DB session
         db = AsyncSessionLocal()
         
-        # Create metric persister
+        # Create metric persister with custom message handler
         metric_persister = DBMetricPersister(db)
         
-        # Start metric persister (use localhost if running in development)
-        broker_host = "localhost"  # Change to your MQTT broker host
+        # Register the custom message handler
+        metric_persister.register_message_handler(handle_metric_message)
+        
+        # Start metric persister with the physical sensor grid MQTT broker
+        broker_host = "169.254.100.100"  # Physical sensor grid IP address
         broker_port = 1883
         await metric_persister.start(broker_host, broker_port)
         

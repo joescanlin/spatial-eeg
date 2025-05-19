@@ -1,5 +1,8 @@
 import numpy as np
-from src.utils.config import config
+
+# Default sensor dimensions
+SENSOR_ROWS = 12
+SENSOR_COLS = 15
 
 def calc_cop(frame_bool) -> tuple[float, float]:
     """
@@ -11,9 +14,9 @@ def calc_cop(frame_bool) -> tuple[float, float]:
     Returns:
         tuple[float, float]: (x, y) coordinates of the center of pressure
     """
-    # Get dimensions from config
-    R = config.get("SENSOR_ROWS", 12)
-    C = config.get("SENSOR_COLS", 15)
+    # Get dimensions
+    R = SENSOR_ROWS
+    C = SENSOR_COLS
     
     # Count active pixels
     active_count = np.sum(frame_bool)
@@ -39,9 +42,9 @@ def split_load(frame_bool) -> dict:
     Returns:
         dict: Percentages of load in left/right and anterior/posterior regions
     """
-    # Get dimensions from config
-    R = config.get("SENSOR_ROWS", 12)
-    C = config.get("SENSOR_COLS", 15)
+    # Get dimensions
+    R = SENSOR_ROWS
+    C = SENSOR_COLS
     
     # Calculate total active sensors
     total = np.sum(frame_bool)

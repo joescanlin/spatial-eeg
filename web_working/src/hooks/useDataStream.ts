@@ -4,6 +4,7 @@ import { GridData, GridStats } from "../types/grid";
 const API_BASE_URL = "/api";
 
 export function useDataStream() {
+  // Default grid data with empty state
   const [gridData, setGridData] = useState<GridData>({
     frame: Array(15).fill(Array(12).fill(0)),
     fallDetected: false,
@@ -13,7 +14,7 @@ export function useDataStream() {
     gaitMetrics: {
       speed: 0,
       strideLength: 0,
-      symmetryScore: 1,
+      symmetryScore: 0,
       stepCount: 0
     },
     wanderingMetrics: {
@@ -23,9 +24,9 @@ export function useDataStream() {
       repetitiveScore: 0
     },
     balanceMetrics: {
-      stabilityScore: 1,
+      stabilityScore: 0,
       swayArea: 0,
-      weightDistribution: 50,
+      weightDistribution: 0,
       copMovement: 0
     },
     alertConfig: {
@@ -38,9 +39,10 @@ export function useDataStream() {
     alerts: []
   });
 
+  // Stats with "connecting" status initially
   const [stats, setStats] = useState<GridStats>({
-    frameRate: 10,
-    connectionStatus: "disconnected",
+    frameRate: 0,
+    connectionStatus: "connecting",
     lastUpdate: new Date().toISOString(),
     activeSensors: 0
   });
@@ -59,7 +61,7 @@ export function useDataStream() {
       if (now - lastFrameTime >= 1000) {
         setStats((prev) => ({
           ...prev,
-          frameRate: frameCount,
+          frameRate: frameCount || 0,
         }));
         frameCount = 0;
         lastFrameTime = now;
@@ -94,7 +96,6 @@ export function useDataStream() {
         setStats((prev) => ({
           ...prev,
           connectionStatus: "disconnected",
-          lastUpdate: new Date().toISOString(),
         }));
       }
     };
@@ -125,10 +126,6 @@ export function useDataStream() {
             });
             console.log("🏃‍♂️ Gait Metrics:", data.gaitMetrics);
             console.log("⚖️ Balance Metrics:", data.balanceMetrics);
-
-           const booleanGrid = data.grid.map((row: number[]) =>
-             row.map((cell: number) => Boolean(cell > 0))
-           );
 
            // Calculate active sensors
            const activeCount = data.grid.reduce((sum: number, row: number[]) => 
@@ -182,7 +179,7 @@ export function useDataStream() {
             setGridData((prev) => ({
               ...prev,
               fallDetected: false,
-             fallProbability: 0,
+              fallProbability: 0,
               timestamp: data.timestamp || new Date().toISOString(),
             }));
 
@@ -206,7 +203,6 @@ export function useDataStream() {
       setStats((prev) => ({
         ...prev,
         connectionStatus: "disconnected",
-        lastUpdate: new Date().toISOString(),
       }));
     };
 

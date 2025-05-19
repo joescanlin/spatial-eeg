@@ -11,7 +11,7 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 import numpy as np
 
-from src.utils.config import config
+from src.utils.config import get_settings
 from src.utils.mqtt_client import create_mqtt_client, subscribe_pt_raw
 from src.pt_analytics.parsers.frame_parser import parse_frame
 from src.pt_analytics.services.publisher import PTMetricPublisher
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Global variables
 running = True
 publisher = None
+settings = get_settings()
 
 def signal_handler(sig, frame):
     """Handle interrupt signals to cleanly shutdown."""
@@ -119,17 +120,9 @@ def main():
     # Set environment variable for PT mode
     os.environ['MODE'] = 'PT'
     
-    # Override config with command line arguments
-    if args.raw_topic:
-        config.data['RAW_TOPIC'] = args.raw_topic
-    if args.metrics_topic:
-        config.data['DERIVED_TOPIC'] = args.metrics_topic
-    if args.publish_hz:
-        config.data['PUBLISH_HZ'] = args.publish_hz
-    
-    # Get broker information
-    broker_host = args.broker or config.get('broker', 'localhost')
-    broker_port = args.port or config.get('port', 1883)
+    # Get broker information from args or config
+    broker_host = args.broker or "169.254.100.100"  # Default to the value from config.yaml
+    broker_port = args.port or 1883
     
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)

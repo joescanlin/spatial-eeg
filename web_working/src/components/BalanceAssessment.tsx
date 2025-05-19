@@ -4,6 +4,7 @@ import { BalanceMetrics } from '../types/grid';
 import clsx from 'clsx';
 import Chart from 'chart.js/auto';
 import { CollapsiblePanel } from './CollapsiblePanel';
+import GaugeCard from './GaugeCard';
 
 interface BalanceAssessmentProps {
   metrics: BalanceMetrics;
@@ -108,23 +109,31 @@ export function BalanceAssessment({ metrics }: BalanceAssessmentProps) {
         <canvas ref={chartRef} />
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
-        <div className="flex flex-col">
-          <span className="text-gray-400">Stability Score</span>
-          <span className="font-semibold">{(metrics.stabilityScore * 100).toFixed(0)}%</span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-gray-400">Weight Distribution</span>
-          <span className="font-semibold">{metrics.weightDistribution.toFixed(0)}%</span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-gray-400">Sway Area</span>
-          <span className="font-semibold">{metrics.swayArea.toFixed(1)} sq in</span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-gray-400">CoP Movement</span>
-          <span className="font-semibold">{metrics.copMovement.toFixed(1)} in/s</span>
-        </div>
+      <div className="grid grid-cols-2 gap-3 mt-4">
+        <GaugeCard 
+          label="Stability Score" 
+          value={metrics.stabilityScore * 100} 
+          max={100} 
+          color="#3b82f6" 
+        />
+        <GaugeCard 
+          label="Weight Distribution" 
+          value={metrics.weightDistribution} 
+          max={100} 
+          color="#22c55e" 
+        />
+        <GaugeCard 
+          label="Sway Area" 
+          value={metrics.swayArea} 
+          max={20} 
+          color="#eab308" 
+        />
+        <GaugeCard 
+          label="CoP Movement" 
+          value={metrics.copMovement} 
+          max={10} 
+          color="#a855f7" 
+        />
       </div>
     </CollapsiblePanel>
   );

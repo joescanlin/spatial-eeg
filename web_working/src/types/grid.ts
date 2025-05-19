@@ -13,7 +13,7 @@ export interface GridData {
 
 export interface GridStats {
   frameRate: number;
-  connectionStatus: 'connected' | 'disconnected';
+  connectionStatus: 'connected' | 'disconnected' | 'connecting' | 'simulated';
   lastUpdate: string;
   activeSensors: number;  // number of currently active sensors
 }

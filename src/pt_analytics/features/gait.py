@@ -4,8 +4,12 @@ import time
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Literal
 
-from src.utils.config import config
 from src.pt_analytics.features.load import calc_cop
+
+# Constants
+SENSOR_ROWS = 12
+SENSOR_COLS = 15
+PIXEL_SIZE_IN = 4  # Default pixel size in inches
 
 @dataclass
 class GaitEvent:
@@ -33,7 +37,7 @@ class GaitDetector:
         self.events = []
         self.last_heel_strike = None
         self.last_toe_off = None
-        self.pixel_size_in = config.get("PIXEL_SIZE_IN", 4)
+        self.pixel_size_in = PIXEL_SIZE_IN
         
     def update(self, frame_bool, ts):
         """
@@ -78,7 +82,7 @@ class GaitDetector:
         # Detect heel-strike (rising edge)
         if dx >= self.stride_px_thresh and np.sum(current_frame) > np.sum(prev_frame) * 1.2:
             # Determine side (left/right) based on CoP position relative to center
-            C = config.get("SENSOR_COLS", 15)
+            C = SENSOR_COLS
             side = "left" if current_x < C/2 else "right"
             
             # Calculate stride length from previous heel strike of the same side

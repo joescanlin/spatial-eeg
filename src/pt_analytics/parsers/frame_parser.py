@@ -1,7 +1,10 @@
 import numpy as np
 import gzip
 from scipy.ndimage import median_filter
-from src.utils.config import config
+
+# Default sensor dimensions
+SENSOR_ROWS = 12
+SENSOR_COLS = 15
 
 def parse_frame(frame_bytes: bytes, gzipped=True) -> np.ndarray:
     """
@@ -14,9 +17,9 @@ def parse_frame(frame_bytes: bytes, gzipped=True) -> np.ndarray:
     Returns:
         np.ndarray: Binary array where True indicates active sensors
     """
-    # Get sensor dimensions from config
-    R = config.get("SENSOR_ROWS", 12)
-    C = config.get("SENSOR_COLS", 15)
+    # Get sensor dimensions
+    R = SENSOR_ROWS
+    C = SENSOR_COLS
     
     # Decompress if gzipped
     data = gzip.decompress(frame_bytes) if gzipped else frame_bytes

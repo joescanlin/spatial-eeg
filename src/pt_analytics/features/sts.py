@@ -4,7 +4,6 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Tuple, Optional, List
 
-from src.utils.config import config
 from src.pt_analytics.features.load import calc_cop
 
 class STSState(Enum):

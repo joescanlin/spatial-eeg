@@ -3,7 +3,6 @@ import logging
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
-from src.utils.config import config
 from src.utils.mqtt_client import publish_pt_metrics
 from src.pt_analytics.features.gait import GaitDetector
 from src.pt_analytics.features.balance import BalanceTracker 
@@ -38,7 +37,7 @@ class PTMetricPublisher:
         self.mqtt_client = mqtt_client
         
         # Set publishing frequency
-        self.publish_hz = publish_hz or config.get("PUBLISH_HZ", 5)
+        self.publish_hz = publish_hz or 5  # Default to 5 Hz
         self.last_publish_time = 0
         self.publish_interval = 1.0 / self.publish_hz
         

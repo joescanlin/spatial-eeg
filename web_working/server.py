@@ -17,6 +17,7 @@ import requests  # Add requests for Mobile Text Alerts API
 import traceback
 import random
 import logging.handlers
+import uuid
 
 # Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
@@ -162,22 +163,7 @@ def init_detector_and_buffers():
     global detector, frame_buffer, high_prob_frames, last_fall_time, fall_probability, fall_in_progress
     
     try:
-        logger.info("Initializing fall detector and buffers...")
-        
-        # Initialize detector 
-        detector = FallDetector(sequence_length=SEQUENCE_LENGTH)
-        model_path = "models/fall_detector_final"  # Updated path to latest model directory
-        
-        # Load model directly like CLI version
-        detector.load_model(model_path)
-        
-        # Verify model loaded
-        logger.info(f"Model loaded successfully from: {detector.model_path}")
-        logger.info(f"Model summary:")
-        detector.model.summary(print_fn=logger.info)
-
-        # Log model weights
-        log_model_weights(detector.model)
+        logger.info("Bypassing fall detector initialization for PT testing...")
         
         # Initialize buffers
         frame_buffer.clear()
@@ -186,16 +172,13 @@ def init_detector_and_buffers():
         fall_probability = 0.0
         fall_in_progress = False
         
-        logger.info("All buffers initialized")
-        logger.info(f"Fall detection settings:")
-        logger.info(f"Sequence Length: {SEQUENCE_LENGTH}")
-        logger.info(f"Fall Threshold: {FALL_THRESHOLD}")
-        logger.info(f"Consecutive Frames: {CONSECUTIVE_FRAMES}")
+        logger.info("All buffers initialized - Fall detector bypassed")
+        logger.info("This server is configured for PT metrics testing only")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error initializing detector and buffers: {str(e)}")
+        logger.error(f"Error initializing buffer: {str(e)}")
         logger.error(f"Error type: {type(e).__name__}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -926,7 +909,11 @@ def on_mqtt_connect(client, userdata, flags, rc):
             (ALERTS_TOPIC, 0, "Fall detection alerts"),
             ("controller/networkx/frame/rft", 0, "Frame data"),
             ("analysis/path/rft/active", 0, "Active path data"),
-            ("analysis/path/rft/complete", 0, "Completed path data")
+            ("analysis/path/rft/complete", 0, "Completed path data"),
+            ("pt/metrics", 0, "PT metrics data"),
+            ("pt/exercise/status", 0, "PT exercise status"),
+            ("pt/exercise/type", 0, "PT exercise type"),
+            ("pt/exercise/command", 0, "PT exercise commands")
         ]
         
         # Subscribe to topics with enhanced logging
@@ -1502,6 +1489,147 @@ def get_training_sequence(filename):
             'error': 'Internal server error',
             'message': str(e)
         }), 500
+
+@app.route('/api/metrics-stream')
+def metrics_stream():
+    """SSE endpoint for PT metrics updates - only relays real sensor data"""
+    try:
+        logger.info("PT metrics stream endpoint called - real sensor data only")
+        
+        # Global variables to track metrics from MQTT
+        metrics_queue = queue.Queue()
+        
+        # Define callback for PT metrics topic
+        def on_pt_metrics(client, userdata, message):
+            try:
+                metrics_data = json.loads(message.payload.decode('utf-8'))
+                logger.info(f"Received PT metrics from MQTT: {metrics_data}")
+                metrics_queue.put(metrics_data)
+            except Exception as e:
+                logger.error(f"Error processing PT metrics from MQTT: {e}")
+        
+        # Register the callback for PT metrics topic
+        mqtt_client.message_callback_add("pt/metrics", on_pt_metrics)
+        
+        def generate():
+            try:
+                while True:
+                    try:
+                        # Try to get new metrics with a timeout
+                        try:
+                            metrics = metrics_queue.get(timeout=10)
+                            # Add timestamp if not present
+                            if "timestamp" not in metrics:
+                                metrics["timestamp"] = datetime.now().isoformat()
+                                
+                            logger.info(f"Forwarding real PT metrics to client: {metrics}")
+                            yield f"event: metrics\ndata: {json.dumps(metrics)}\n\n"
+                        except queue.Empty:
+                            # Send heartbeat to keep connection alive
+                            yield f": heartbeat\n\n"
+                            time.sleep(1)
+                    except Exception as e:
+                        logger.error(f"Error in PT metrics stream: {str(e)}")
+                        yield f"event: error\ndata: {json.dumps({'error': 'Connection issue'})}\n\n"
+                        time.sleep(1)
+            finally:
+                # Clean up callback on disconnect
+                mqtt_client.message_callback_remove("pt/metrics")
+                logger.info("Removed PT metrics callback on client disconnect")
+
+        logger.info("Setting up PT metrics SSE response - real sensor data only")
+        response = Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': 'true'
+            }
+        )
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error setting up PT metrics stream: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+# PT Session management API endpoints
+@app.route('/api/pt-sessions', methods=['POST'])
+def create_pt_session():
+    """Create a new PT session"""
+    try:
+        data = request.json
+        
+        # Validate required fields
+        required_fields = ['patientId', 'startTime']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # In a real application, save to database
+        session_id = str(uuid.uuid4())
+        
+        # Log the new session
+        logger.info(f"Created new PT session: {session_id} for patient {data['patientId']}")
+        
+        # Return success with the session ID
+        return jsonify({
+            'id': session_id,
+            'status': 'created',
+            'message': 'PT session created successfully'
+        }), 201
+    except Exception as e:
+        logger.error(f"Error creating PT session: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pt-sessions/<session_id>', methods=['PUT'])
+def update_pt_session(session_id):
+    """Update an existing PT session (end session, add metrics)"""
+    try:
+        data = request.json
+        
+        # In a real application, update in database
+        logger.info(f"Updated PT session: {session_id} with data: {data}")
+        
+        # Return success
+        return jsonify({
+            'id': session_id,
+            'status': 'updated',
+            'message': 'PT session updated successfully'
+        }), 200
+    except Exception as e:
+        logger.error(f"Error updating PT session: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pt-sessions/<session_id>/metrics', methods=['POST'])
+def add_session_metrics(session_id):
+    """Add metrics to an existing PT session"""
+    try:
+        metrics = request.json
+        
+        # Validate metrics
+        if not isinstance(metrics, list):
+            return jsonify({'error': 'Metrics must be an array'}), 400
+        
+        # In a real application, save metrics to database
+        logger.info(f"Added {len(metrics)} metrics to PT session: {session_id}")
+        
+        # Return success
+        return jsonify({
+            'id': session_id,
+            'metrics_count': len(metrics),
+            'status': 'metrics_added',
+            'message': 'PT session metrics added successfully'
+        }), 200
+    except Exception as e:
+        logger.error(f"Error adding metrics to PT session: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     try:

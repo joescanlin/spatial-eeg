@@ -32,7 +32,10 @@ export function useMQTTConnection() {
         mqttClient.subscribe([
           'controller/networkx/frame/rft',
           'analysis/path/rft/active',
-          'analysis/path/rft/complete'
+          'analysis/path/rft/complete',
+          'pt/metrics',
+          'pt/exercise/status',
+          'pt/exercise/type'
         ]);
       });
 

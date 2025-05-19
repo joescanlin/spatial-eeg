@@ -1,10 +1,10 @@
 import numpy as np
 from collections import deque
 from scipy.spatial import ConvexHull
-from src.utils.config import config
 
 # Constants
 IN_TO_CM = 2.54  # conversion from inches to centimeters
+PIXEL_SIZE_IN = 4  # default pixel size in inches
 
 class BalanceTracker:
     """
@@ -25,7 +25,7 @@ class BalanceTracker:
         self.fps = fps
         self.window_size = int(window_sec * fps)
         self.window = deque(maxlen=self.window_size)
-        self.pixel_size_in = config.get("PIXEL_SIZE_IN", 4)
+        self.pixel_size_in = PIXEL_SIZE_IN
         
     def update(self, cop_x, cop_y, ts):
         """
