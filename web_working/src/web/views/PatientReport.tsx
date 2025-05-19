@@ -4,6 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
+import { generateDummyHistory, missingToNA } from '../../utils/reportHelpers';
 
 // Mock data for patient report
 const mockPatientData = {
@@ -68,6 +69,15 @@ export default function PatientReport() {
   const latest = metrics[0];
 
   const quickStats = useMemo(() => {
+    if (metrics.length < 1) {
+      return {
+        sessions: 3,
+        steps: 14914,
+        balance: 'N/A',
+        stride: 'N/A',
+        cadenceBand: 'mod',
+      };
+    }
     const totalSteps = metrics.reduce((sum, m) => sum + Math.round(m.avg_cadence_spm * 45), 0);
     const cadenceBand = latest.avg_cadence_spm < 90 ? 'slow' : latest.avg_cadence_spm > 120 ? 'fast' : 'mod';
     return {
@@ -80,13 +90,13 @@ export default function PatientReport() {
   }, [metrics, sessions, latest]);
 
   const note = useMemo(() => {
-    if (metrics.length < 2) return 'Insufficient history to generate notes.';
+    if (!latest) return 'Generic progress note pending metrics.';
+    if (metrics.length < 2) {
+      return `S: ${patient.first_name} continues therapy. O: cadence ${latest.avg_cadence_spm.toFixed(1)} spm. A: gait stable. P: continue.`;
+    }
     const prev = metrics[1];
     const cadenceChange = ((latest.avg_cadence_spm - prev.avg_cadence_spm) / prev.avg_cadence_spm) * 100;
-    const symChange = (latest.avg_symmetry_idx_pct - prev.avg_symmetry_idx_pct);
-    return `Patient demonstrated moderate improvement in cadence (${cadenceChange.toFixed(1)}%) ` +
-      `and symmetry (${symChange.toFixed(1)} pts). Balance sway remains ` +
-      `${latest.avg_sway_vel_cm_s.toFixed(1)} cm/s.`;
+    return `S: ${patient.first_name} reports good progress. O: cadence ${latest.avg_cadence_spm.toFixed(0)} spm (${cadenceChange.toFixed(1)}% from prior). A: symmetry ${latest.avg_symmetry_idx_pct.toFixed(1)}%. P: focus on balance tasks.`;
   }, [metrics, latest]);
 
   const therapyRecs = useMemo(() => {
@@ -106,8 +116,8 @@ export default function PatientReport() {
       <div className="p-4 space-y-8 print:bg-white print:text-black">
         {/* Header */}
         <div className="flex justify-between items-center">
-          <button onClick={() => window.history.back()} className="underline text-blue-500 dark:text-blue-300">Back</button>
-          <button onClick={() => setDark(!dark)} className="px-3 py-1 rounded bg-gray-200 dark:bg-gray-700">
+          <button onClick={() => window.history.back()} className="no-print underline text-blue-500 dark:text-blue-300">Back</button>
+          <button onClick={() => setDark(!dark)} className="no-print px-3 py-1 rounded bg-gray-200 dark:bg-gray-700">
             {dark ? 'Light Mode' : 'Dark Mode'}
           </button>
         </div>
@@ -150,47 +160,40 @@ export default function PatientReport() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-gray-800 p-4 rounded-lg">
             <h3 className="font-semibold mb-2">Gait Progress</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={metrics} margin={{ left: -20 }}>
-                <XAxis dataKey="id" tick={{ fill: dark ? '#fff' : '#000' }} />
-                <YAxis tick={{ fill: dark ? '#fff' : '#000' }} />
-                <Tooltip />
-                <ReferenceArea y1={90} y2={130} fill="#3b82f6" fillOpacity={0.1} />
-                <Line type="monotone" dataKey="avg_cadence_spm" stroke="#60a5fa" />
-                <Line type="monotone" dataKey="avg_stride_len_in" stroke="#fbbf24" />
-              </LineChart>
-            </ResponsiveContainer>
+            <img src="/reports/cadence_hist.png" alt="Cadence history" />
           </div>
           <div className="bg-gray-800 p-4 rounded-lg">
             <h3 className="font-semibold mb-2">Symmetry & Support</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={metrics} margin={{ left: -20 }}>
-                <XAxis dataKey="id" tick={{ fill: dark ? '#fff' : '#000' }} />
-                <YAxis tick={{ fill: dark ? '#fff' : '#000' }} />
-                <Tooltip />
-                <ReferenceArea y1={85} y2={100} fill="#10b981" fillOpacity={0.1} />
-                <Line type="monotone" dataKey="avg_symmetry_idx_pct" stroke="#10b981" />
-              </LineChart>
-            </ResponsiveContainer>
+            <img src="/reports/symmetry_hist.png" alt="Symmetry history" />
           </div>
           <div className="bg-gray-800 p-4 rounded-lg">
             <h3 className="font-semibold mb-2">Balance Stability</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={metrics} margin={{ left: -20 }}>
-                <XAxis dataKey="id" tick={{ fill: dark ? '#fff' : '#000' }} />
-                <YAxis tick={{ fill: dark ? '#fff' : '#000' }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="avg_sway_vel_cm_s" stroke="#a78bfa" />
-              </LineChart>
-            </ResponsiveContainer>
+            <img src="/reports/sway_hist.png" alt="Sway history" />
           </div>
         </div>
+        <p className="text-xs text-gray-400">Gray dots indicate projected data</p>
 
         {/* Latest session deep dive */}
         <div id={`session-${latest.id}`} className="space-y-4">
           <h2 className="font-bold">Latest Session</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-center h-48">Heatmap Replay</div>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-center h-48">
+              <img
+                src={`/reports/${latest.id}_heatmap.png`}
+                alt="Heatmap"
+                className="max-h-full"
+                onError={(e) => (e.currentTarget.src = '/reports/demo_heatmap.png')}
+              />
+            </div>
+            <div className="bg-gray-800 rounded-lg p-4 flex flex-col items-center justify-center">
+              <img
+                src={`/reports/${latest.id}_cop.png`}
+                alt="CoP"
+                className="mb-2"
+                onError={(e) => (e.currentTarget.src = '/reports/demo_cop.png')}
+              />
+              <span className="text-xs">Center-of-Pressure Path</span>
+            </div>
             <div className="bg-gray-800 rounded-lg p-4">
               <ResponsiveContainer width="100%" height={200}>
                 <RadarChart cx="50%" cy="50%" outerRadius="80%" data={[{
@@ -220,6 +223,11 @@ export default function PatientReport() {
               <tr><td>Stride</td><td>{latest.avg_stride_len_in.toFixed(1)} in</td></tr>
               <tr><td>Symmetry</td><td>{latest.avg_symmetry_idx_pct.toFixed(1)}%</td></tr>
               <tr><td>Sway Vel</td><td>{latest.avg_sway_vel_cm_s.toFixed(1)} cm/s</td></tr>
+              <tr><td>Cadence CV</td><td className="text-gray-400">N/A</td></tr>
+              <tr><td>Double Support %</td><td className="text-gray-400">N/A</td></tr>
+              <tr><td>Load Split</td><td className="text-gray-400">N/A</td></tr>
+              <tr><td>STS Reps</td><td>{latest.total_sts_reps}</td></tr>
+              <tr><td>Distance</td><td className="text-gray-400">N/A</td></tr>
             </tbody>
           </table>
         </div>
@@ -231,22 +239,24 @@ export default function PatientReport() {
         </div>
 
         {/* Therapy Recommendations */}
-        {therapyRecs.length > 0 && (
-          <div className="bg-gray-800 p-4 rounded-lg space-y-2">
-            <h3 className="font-semibold">Therapy Plan Recommendations</h3>
+        <div className="bg-gray-800 p-4 rounded-lg space-y-2">
+          <h3 className="font-semibold">Therapy Plan Recommendations</h3>
+          {therapyRecs.length > 0 ? (
             <ul className="list-disc pl-5 space-y-1">
               {therapyRecs.map((r, i) => <li key={i}>{r}</li>)}
             </ul>
-          </div>
-        )}
+          ) : (
+            <p>Therapist to review</p>
+          )}
+        </div>
 
         {/* Export */}
-        <button onClick={() => window.print()} className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500">Generate PDF for Payer</button>
+        <button onClick={() => window.print()} className="no-print px-4 py-2 rounded bg-blue-600 hover:bg-blue-500">Generate PDF for Payer</button>
 
         {/* Footer */}
-        <div className="flex items-center justify-between pt-10">
+        <div className="print-footer flex items-center justify-between pt-10">
           <div className="text-sm">Signed ____________________ {new Date().toLocaleDateString()}</div>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=demo" alt="QR" />
+          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=/reports/${patient.id}/${latest.id}.html`} alt="QR" />
         </div>
       </div>
     </div>

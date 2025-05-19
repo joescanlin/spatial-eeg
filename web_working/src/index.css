@@ -32,3 +32,24 @@
 .animate-pulse {
   animation: pulse 1.5s ease-in-out infinite;
 }
+
+.alert-cell {
+  color: #dc2626;
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print { display: none !important; }
+  .print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    background: white;
+  }
+  img { image-rendering: pixelated; }
+}
