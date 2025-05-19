@@ -3,7 +3,7 @@ import { GridData, GridStats } from "../types/grid";
 
 const API_BASE_URL = "/api";
 
-export function useDataStream() {
+export function useDataStream(activeView?: string) {
   // Default grid data with empty state
   const [gridData, setGridData] = useState<GridData>({
     frame: Array(15).fill(Array(12).fill(0)),
@@ -48,6 +48,22 @@ export function useDataStream() {
   });
 
   useEffect(() => {
+    // Skip data fetching if we're not in a view that needs the grid data
+    // Keep active for dashboard, pt-session, and live-gait views
+    const viewsNeedingGridData = ['dashboard', 'pt-session', 'live-gait'];
+    
+    if (activeView && !viewsNeedingGridData.includes(activeView)) {
+      console.log(`🚫 Grid data stream disabled for ${activeView} view`);
+      setStats(prev => ({
+        ...prev,
+        connectionStatus: "simulated",
+        lastUpdate: new Date().toISOString()
+      }));
+      return; // Don't set up EventSource
+    }
+    
+    console.log(`✅ Grid data stream enabled for ${activeView} view`);
+    
     let frameCount = 0;
     let lastFrameTime = Date.now();
 
@@ -211,7 +227,7 @@ export function useDataStream() {
       eventSource.close();
       clearInterval(statusInterval);
     };
-  }, []);
+  }, [activeView]);
 
   return { gridData, stats };
 }

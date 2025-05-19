@@ -25,11 +25,12 @@ interface Patient {
 }
 
 function App() {
-  const { gridData, stats } = useDataStream();
-  const { alerts, isLoading: alertsLoading, error: alertsError } = useAlertHistory();
-  
   // Set PT Dashboard as the default view
   const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait'>('pt-dashboard');
+  
+  // Pass current view to useDataStream
+  const { gridData, stats } = useDataStream(view);
+  const { alerts, isLoading: alertsLoading, error: alertsError } = useAlertHistory();
 
   // State for the selected patient in patient detail view
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);

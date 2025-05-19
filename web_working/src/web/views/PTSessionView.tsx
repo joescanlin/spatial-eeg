@@ -16,7 +16,7 @@ import { usePTStream } from '../../hooks/usePTStream';
 import { ChevronRight, ChevronLeft, LayoutGrid } from 'lucide-react';
 
 export default function PTSessionView() {
-  const { gridData, stats } = useDataStream();
+  const { gridData, stats } = useDataStream('pt-session');
   const { 
     ptMetrics, 
     isExerciseActive, 
@@ -24,7 +24,7 @@ export default function PTSessionView() {
     isConnected,
     startExercise, 
     stopExercise 
-  } = usePTStream();
+  } = usePTStream('pt-session');
   
   const {
     selectedPatient,

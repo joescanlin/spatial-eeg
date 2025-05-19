@@ -61,9 +61,9 @@ interface SessionData {
 }
 
 export function usePTSession() {
-  // Get data from other hooks
-  const { gridData } = useDataStream();
-  const { ptMetrics } = usePTStream();
+  // Get data from other hooks with the current view explicitly set
+  const { gridData } = useDataStream('pt-session');
+  const { ptMetrics } = usePTStream('pt-session');
   
   // Session state
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);

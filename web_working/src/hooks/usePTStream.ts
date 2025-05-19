@@ -12,7 +12,7 @@ export interface PTMetrics {
   timestamp: string;
 }
 
-export function usePTStream() {
+export function usePTStream(activeView?: string) {
   const { client, status } = useMQTTConnection();
   
   // Default values that will be used regardless of connection status
@@ -34,6 +34,18 @@ export function usePTStream() {
   
   // Connect to SSE API for metrics (real sensor data only)
   useEffect(() => {
+    // Skip data fetching if we're not in a view that needs PT metrics
+    const viewsNeedingPTMetrics = ['pt-session', 'live-gait'];
+    
+    if (activeView && !viewsNeedingPTMetrics.includes(activeView)) {
+      console.log(`🚫 PT metrics stream disabled for ${activeView} view`);
+      setIsConnected(false);
+      setError(null);
+      return; // Don't set up EventSource
+    }
+    
+    console.log(`✅ PT metrics stream enabled for ${activeView || 'default'} view`);
+    
     console.log("Setting up PT metrics event source for real sensor data");
     // Always use default values by setting loading to false
     setLoading(false);
@@ -92,7 +104,7 @@ export function usePTStream() {
       console.log("Closing PT metrics event source");
       eventSource.close();
     };
-  }, []);
+  }, [activeView]);
   
   // Also keep the MQTT connection for exercise commands
   useEffect(() => {
