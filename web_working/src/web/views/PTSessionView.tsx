@@ -14,17 +14,33 @@ import { useDataStream } from '../../hooks/useDataStream';
 import { PTExercisePanel } from '../../components/PTExercisePanel';
 import { usePTStream } from '../../hooks/usePTStream';
 import { ChevronRight, ChevronLeft, LayoutGrid } from 'lucide-react';
+import { useBalanceTraining } from '../../hooks/useBalanceTraining';
+import { BalanceTrainingGuide } from '../../components/BalanceTrainingGuide';
 
 export default function PTSessionView() {
   const { gridData, stats } = useDataStream('pt-session');
-  const { 
-    ptMetrics, 
-    isExerciseActive, 
-    exerciseType, 
+  const {
+    ptMetrics,
+    isExerciseActive,
+    exerciseType,
     isConnected,
-    startExercise, 
-    stopExercise 
+    startExercise,
+    stopExercise
   } = usePTStream('pt-session');
+
+  const balanceTraining = useBalanceTraining(selectedPatient?.id ?? null);
+
+  const handleStartExercise = (type: string) => {
+    startExercise(type);
+    if (type === 'balance') {
+      balanceTraining.start();
+    }
+  };
+
+  const handleStopExercise = () => {
+    stopExercise();
+    balanceTraining.stop();
+  };
   
   const {
     selectedPatient,
@@ -204,8 +220,8 @@ export default function PTSessionView() {
               metrics={ptMetrics}
               isActive={isExerciseActive}
               exerciseType={exerciseType}
-              onStart={startExercise}
-              onStop={stopExercise}
+              onStart={handleStartExercise}
+              onStop={handleStopExercise}
               isConnected={isConnected}
             />
             
@@ -220,8 +236,16 @@ export default function PTSessionView() {
         
         {/* Main content - grid display */}
         <div className={`flex-grow transition-all duration-300 ${rightPanelCollapsed ? 'mr-0' : 'mr-0 lg:mr-80'}`}>
-          <div className="h-[700px]">
+          <div className="h-[700px] relative">
             <GridDisplay data={gridData} />
+            <div className="absolute top-4 right-4">
+              <BalanceTrainingGuide
+                active={balanceTraining.active}
+                stepText={balanceTraining.stepText}
+                progress={balanceTraining.progress}
+                onStop={balanceTraining.stop}
+              />
+            </div>
           </div>
           
           {/* Session metrics summary - below grid */}
