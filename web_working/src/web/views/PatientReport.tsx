@@ -1,317 +1,158 @@
-import React, { useState, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea,
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
-} from 'recharts';
-import { generateDummyHistory, missingToNA } from '../../utils/reportHelpers';
+import React from 'react';
 
-// Mock data for patient report
-const mockPatientData = {
+// Demo data used for static report rendering. Swap with API data when available.
+const patient = {
   id: 1,
   first_name: 'John',
   last_name: 'Doe',
-  dx_icd10: 'M54.5',
-  height_cm: 175,
-  weight_kg: 70,
+  age: 34,
+  dx_icd10: 'S83.511A',
   surgery_date: '2025-04-01',
-  insurance: 'Medicare',
 };
 
-const mockSessionsData = [
-  { id: 1, start_ts: '2025-05-15T14:30:00Z', end_ts: '2025-05-15T15:15:00Z', patient_id: 1, activity: 'gait' },
-  { id: 2, start_ts: '2025-05-10T10:00:00Z', end_ts: '2025-05-10T10:45:00Z', patient_id: 1, activity: 'balance' },
-  { id: 3, start_ts: '2025-05-05T16:15:00Z', end_ts: '2025-05-05T17:00:00Z', patient_id: 1, activity: 'sts' },
+const metrics = [
+  { session: 1, cadence: 76, stride: 21, symmetry: 28, double_support: 34, sway: 3.2 },
+  { session: 2, cadence: 83, stride: 25, symmetry: 17, double_support: 33, sway: 2.4 },
+  { session: 3, cadence: 92, stride: 28, symmetry: 8, double_support: 31, sway: 1.8 },
 ];
 
-const mockMetricsData = [
-  {
-    id: 1,
-    start_ts: '2025-05-15T14:30:00Z',
-    avg_cadence_spm: 112.5,
-    avg_stride_len_in: 28.3,
-    avg_symmetry_idx_pct: 92.1,
-    avg_sway_vel_cm_s: 1.8,
-    total_sts_reps: 12,
-    total_turn_count: 8,
-  },
-  {
-    id: 2,
-    start_ts: '2025-05-10T10:00:00Z',
-    avg_cadence_spm: 110.2,
-    avg_stride_len_in: 27.8,
-    avg_symmetry_idx_pct: 89.5,
-    avg_sway_vel_cm_s: 2.1,
-    total_sts_reps: 10,
-    total_turn_count: 6,
-  },
-  {
-    id: 3,
-    start_ts: '2025-05-05T16:15:00Z',
-    avg_cadence_spm: 108.7,
-    avg_stride_len_in: 27.1,
-    avg_symmetry_idx_pct: 87.2,
-    avg_sway_vel_cm_s: 2.4,
-    total_sts_reps: 8,
-    total_turn_count: 5,
-  },
-];
-
-// Set to true to use the radar chart or false to use static images for all charts
-const useRadarChart = true;
-
-// Data for the radar chart
-const radarData = [
-  {
-    metric: "Cadence",
-    A: 110,
-    B: 130,
-    fullMark: 150,
-  },
-  {
-    metric: "Symmetry",
-    A: 90,
-    B: 95,
-    fullMark: 100,
-  },
-  {
-    metric: "Sway",
-    A: 20,
-    B: 15,
-    fullMark: 35,
-  },
-  {
-    metric: "Load",
-    A: 50,
-    B: 60,
-    fullMark: 100,
-  },
-  {
-    metric: "ROM",
-    A: 70,
-    B: 80,
-    fullMark: 100,
-  },
-];
+const latest = metrics[2];
 
 export default function PatientReport() {
-  const { id } = useParams<{ id: string }>();
-  const [dark, setDark] = useState(true);
-
-  // For the demo, we're using mock data
-  const patient = mockPatientData;
-  const sessions = mockSessionsData;
-  const metrics = mockMetricsData;
-
-  const latest = metrics[0];
-
-  const quickStats = useMemo(() => {
-    if (metrics.length < 1) {
-      return {
-        sessions: 3,
-        steps: 14914,
-        balance: 'N/A',
-        stride: 'N/A',
-        cadenceBand: 'mod',
-      };
-    }
-    const totalSteps = metrics.reduce((sum, m) => sum + Math.round(m.avg_cadence_spm * 45), 0);
-    const cadenceBand = latest.avg_cadence_spm < 90 ? 'slow' : latest.avg_cadence_spm > 120 ? 'fast' : 'mod';
-    return {
-      sessions: sessions.length,
-      steps: totalSteps,
-      balance: (100 - latest.avg_sway_vel_cm_s * 10).toFixed(1),
-      stride: latest.avg_stride_len_in.toFixed(1),
-      cadenceBand,
-    };
-  }, [metrics, sessions, latest]);
-
-  const note = useMemo(() => {
-    if (!latest) return 'Generic progress note pending metrics.';
-    if (metrics.length < 2) {
-      return `S: ${patient.first_name} continues therapy. O: cadence ${latest.avg_cadence_spm.toFixed(1)} spm. A: gait stable. P: continue.`;
-    }
-    const prev = metrics[1];
-    const cadenceChange = ((latest.avg_cadence_spm - prev.avg_cadence_spm) / prev.avg_cadence_spm) * 100;
-    return `S: ${patient.first_name} reports good progress. O: cadence ${latest.avg_cadence_spm.toFixed(0)} spm (${cadenceChange.toFixed(1)}% from prior). A: symmetry ${latest.avg_symmetry_idx_pct.toFixed(1)}%. P: focus on balance tasks.`;
-  }, [metrics, latest]);
-
-  const therapyRecs = useMemo(() => {
-    const recs: string[] = [];
-    const asym = 100 - latest.avg_symmetry_idx_pct;
-    if (asym > 15) {
-      recs.push('Single-leg stance on unstable surface, 3×30 s each leg.');
-    }
-    if (latest.avg_sway_vel_cm_s * 10 > 25) {
-      recs.push('Eyes-closed tandem stance, 5×20 s.');
-    }
-    return recs;
-  }, [latest]);
-
   return (
-    <div className={dark ? 'dark min-h-screen bg-gray-900 text-white' : 'min-h-screen bg-gray-50 text-gray-900'}>
-      <div className="p-4 space-y-8 print:bg-white print:text-black">
-        {/* Header */}
-        <div className="flex justify-between items-center">
-          <button onClick={() => window.history.back()} className="no-print underline text-blue-500 dark:text-blue-300">Back</button>
-          <button onClick={() => setDark(!dark)} className="no-print px-3 py-1 rounded bg-gray-200 dark:bg-gray-700">
-            {dark ? 'Light Mode' : 'Dark Mode'}
-          </button>
+    <div className="min-h-screen bg-gray-900 text-white p-6 print:white-bg">
+      <div className="max-w-5xl mx-auto space-y-8">
+        <div className="flex justify-between items-center no-print">
+          <button onClick={() => window.history.back()} className="underline text-blue-400">Back</button>
+          <button onClick={() => window.print()} className="px-3 py-1 rounded bg-blue-600">Generate PDF</button>
         </div>
 
-        {patient && (
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center text-xl font-bold">
-                {patient.first_name[0]}{patient.last_name[0]}
-              </div>
-              <div className="space-y-1">
-                <h1 className="text-2xl font-bold">{patient.first_name} {patient.last_name}</h1>
-                <div className="text-sm text-gray-400">ID #{patient.id} &bull; {patient.dx_icd10}</div>
-                <div className="text-sm text-gray-400">Surgery {patient.surgery_date}</div>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="px-2 py-1 rounded-full bg-gray-700 text-xs">{quickStats.sessions} sessions</span>
-              <span className="px-2 py-1 rounded-full bg-gray-700 text-xs">{quickStats.steps} steps</span>
-              <span className="px-2 py-1 rounded-full bg-gray-700 text-xs">Balance {quickStats.balance}</span>
-              <span className="px-2 py-1 rounded-full bg-gray-700 text-xs">Stride {quickStats.stride}</span>
-              <span className="px-2 py-1 rounded-full bg-gray-700 text-xs">Cadence {quickStats.cadenceBand}</span>
-            </div>
+        <header className="space-y-3">
+          <h1 className="text-2xl font-bold">
+            Patient Snapshot – {patient.first_name} {patient.last_name}, {patient.age} yrs, R ACL Reconstruction ({patient.dx_icd10}), Surgery {patient.surgery_date}.
+          </h1>
+          <div className="flex flex-wrap gap-2">
+            <span className="chip">Sessions 3</span>
+            <span className="chip">Total Steps Logged 14&nbsp;914</span>
+            <span className="chip">Avg Cadence 82 spm</span>
+            <span className="chip">Current Stride 28 in</span>
+            <span className="chip">Balance Score 82/100</span>
           </div>
-        )}
+        </header>
 
-        {/* Session timeline */}
-        <div className="space-y-2">
-          <h2 className="font-bold">Session Timeline</h2>
-          <div className="flex overflow-x-auto gap-2 pb-2">
-            {sessions.map((s) => (
-              <a key={s.id} href={`#session-${s.id}`} className="px-3 py-1 rounded-full bg-gray-700 whitespace-nowrap hover:bg-gray-600">
-                {s.start_ts.slice(5,10)} – {s.activity}
-              </a>
-            ))}
-          </div>
-        </div>
+        <section className="space-y-2 text-sm">
+          <p>John has progressed from protected weight-bearing to independent gait over three sessions. Objective cadence rose from 76 spm (session 1) to 92 spm (session 3)—a 21 % gain consistent with mid-phase rehab targets.</p>
+          <p>Stride length increased 7 in and symmetry improved from 28 % to 8 % asymmetry, indicating balanced quad activation. Static sway decreased from 3.2 cm to 1.8 cm, reducing fall risk.</p>
+          <p>Double-support time remains slightly elevated (31 %), suggesting ongoing confidence deficit; load-shift drills prescribed below.</p>
+        </section>
 
-        {/* Longitudinal charts */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h3 className="font-semibold mb-2">Gait Progress</h3>
-            <img src="./reports/cadence_hist.png" alt="Cadence history" />
+        <section>
+          <h2 className="font-semibold mb-2">Progress at a Glance</h2>
+          <div className="grid md:grid-cols-3 gap-4 text-center">
+            <figure className="bg-gray-800 p-4 rounded-lg">
+              <svg viewBox="0 0 300 120" className="w-full h-28">
+                <polyline points="0,37 150,30 300,20" className="stroke-blue-400 fill-none stroke-2" />
+                <polyline points="0,41 150,26 300,15" className="stroke-amber-400 fill-none stroke-2" />
+              </svg>
+              <figcaption className="text-xs mt-1">Cadence &amp; stride trending upward toward discharge goal (110 spm, 32 in).</figcaption>
+            </figure>
+            <figure className="bg-gray-800 p-4 rounded-lg">
+              <svg viewBox="0 0 300 120" className="w-full h-28">
+                <rect x="40" y="36" width="40" height="84" className="fill-green-500" />
+                <rect x="40" y="18" width="40" height="102" className="fill-gray-500 opacity-60" />
+                <rect x="130" y="69" width="40" height="51" className="fill-green-500" />
+                <rect x="130" y="21" width="40" height="99" className="fill-gray-500 opacity-60" />
+                <rect x="220" y="96" width="40" height="24" className="fill-green-500" />
+                <rect x="220" y="27" width="40" height="93" className="fill-gray-500 opacity-60" />
+              </svg>
+              <figcaption className="text-xs mt-1">Symmetry nearing 5 % target; double-support slightly high.</figcaption>
+            </figure>
+            <figure className="bg-gray-800 p-4 rounded-lg">
+              <svg viewBox="0 0 300 120" className="w-full h-28">
+                <rect x="0" y="34" width="300" height="2" className="fill-purple-300" />
+                <polyline points="0,10 150,38 300,58" className="stroke-purple-500 fill-none stroke-2" />
+              </svg>
+              <figcaption className="text-xs mt-1">Sway steadily decreasing; now below risk threshold.</figcaption>
+            </figure>
           </div>
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h3 className="font-semibold mb-2">Symmetry & Support</h3>
-            <img src="./reports/symmetry_hist.png" alt="Symmetry history" />
-          </div>
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <h3 className="font-semibold mb-2">Balance Stability</h3>
-            <img src="./reports/sway_hist.png" alt="Sway history" />
-          </div>
-        </div>
-        <p className="text-xs text-gray-400">Gray dots indicate projected data</p>
+        </section>
 
-        {/* Latest session deep dive */}
-        <div id={`session-${latest.id}`} className="space-y-4">
-          <h2 className="font-bold">Latest Session</h2>
-          <div className="grid md:grid-cols-3 gap-4">
-            <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-center h-48">
-              <img
-                src="./reports/demo_heatmap.png"
-                alt="Heatmap"
-                className="max-h-full"
-              />
+        <section id="latest" className="space-y-4">
+          <h2 className="font-semibold">Latest Session Deep-Dive</h2>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="flex gap-4">
+              <div className="heatmap w-36 h-36 rounded" />
+              <svg viewBox="0 0 150 150" className="cop-path">
+                <path d="M75 40a30 30 0 1 0 0 60a30 30 0 1 0 0-60" stroke="#38bdf8" strokeWidth="4" fill="none" />
+              </svg>
             </div>
-            <div className="bg-gray-800 rounded-lg p-4 flex flex-col items-center justify-center">
-              <img
-                src="./reports/demo_cop.png"
-                alt="CoP"
-                className="mb-2"
-              />
-              <span className="text-xs">Center-of-Pressure Path</span>
-            </div>
-            <div className="bg-gray-800 rounded-lg p-4">
-              {useRadarChart ? (
-                <ResponsiveContainer width="100%" height={200}>
-                  <RadarChart 
-                    cx="50%" 
-                    cy="50%" 
-                    outerRadius="80%" 
-                    data={radarData}
-                  > 
-                    <PolarGrid />
-                    <PolarAngleAxis dataKey="metric" />
-                    <PolarRadiusAxis angle={90} domain={[0, 150]} />
-                    <Radar 
-                      name="Current" 
-                      dataKey="A" 
-                      stroke="#3b82f6" 
-                      fill="#3b82f6" 
-                      fillOpacity={0.6} 
-                    />
-                    <Radar 
-                      name="Target" 
-                      dataKey="B" 
-                      stroke="#10b981" 
-                      fill="#10b981" 
-                      fillOpacity={0.4} 
-                    />
-                    <Tooltip />
-                  </RadarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-gray-400">Chart data loading...</p>
-                </div>
-              )}
+            <div className="flex flex-col items-center">
+              <svg viewBox="0 0 150 150" className="mb-2">
+                <polygon points="75,15 132.1,56.5 110.3,123.5 39.7,123.5 17.9,56.5" className="fill-none stroke-gray-600" />
+                <polygon points="75,33 125.2,58.7 96.2,104.1 49.6,109.9 29.3,60.2" className="fill-blue-500 opacity-40" />
+              </svg>
+              <ul className="text-xs space-y-1 text-center">
+                <li>Cadence 92 spm (Goal 110)</li>
+                <li>Stride 28 in (Goal 32)</li>
+                <li>Sway 1.8 cm (OK)</li>
+                <li>Symmetry 8 % (OK)</li>
+                <li>Load L/R 48 / 52 %</li>
+              </ul>
             </div>
           </div>
+        </section>
+
+        <section>
+          <h2 className="font-semibold mb-2">KPI &amp; Threshold Table</h2>
           <table className="w-full text-sm">
             <thead>
-              <tr>
-                <th className="text-left">Metric</th>
-                <th className="text-left">Value</th>
-              </tr>
+              <tr><th className="text-left">Metric</th><th className="text-left">Value</th><th className="text-left">Goal</th><th className="text-left">Status</th></tr>
             </thead>
             <tbody>
-              <tr><td>Cadence</td><td>{latest.avg_cadence_spm.toFixed(1)} spm</td></tr>
-              <tr><td>Stride</td><td>{latest.avg_stride_len_in.toFixed(1)} in</td></tr>
-              <tr><td>Symmetry</td><td>{latest.avg_symmetry_idx_pct.toFixed(1)}%</td></tr>
-              <tr><td>Sway Vel</td><td>{latest.avg_sway_vel_cm_s.toFixed(1)} cm/s</td></tr>
-              <tr><td>Cadence CV</td><td className="text-gray-400">N/A</td></tr>
-              <tr><td>Double Support %</td><td className="text-gray-400">N/A</td></tr>
-              <tr><td>Load Split</td><td className="text-gray-400">N/A</td></tr>
-              <tr><td>STS Reps</td><td>{latest.total_sts_reps}</td></tr>
-              <tr><td>Distance</td><td className="text-gray-400">N/A</td></tr>
+              <tr><td>Cadence CV</td><td>2.3%</td><td>&lt;4%</td><td className="status-ok">✅</td></tr>
+              <tr><td>Double-Support %</td><td>31%</td><td>&lt;30%</td><td className="status-warn">⚠️</td></tr>
+              <tr><td>Load L/R</td><td>48/52%</td><td>50 / 50% +- 15%</td><td className="status-ok">✅</td></tr>
+              <tr><td>STS Reps (30s)</td><td>12</td><td>&ge; 12</td><td className="status-ok">✅</td></tr>
+              <tr><td>Distance (6-min walk)</td><td>460 m</td><td>600 m</td><td className="status-progress">🔄</td></tr>
             </tbody>
           </table>
-        </div>
+        </section>
 
-        {/* Auto generated notes */}
-        <div className="bg-gray-800 p-4 rounded-lg space-y-2">
-          <h3 className="font-semibold">Auto-Generated Notes</h3>
-          <p>{note}</p>
-        </div>
+        <section>
+          <h2 className="font-semibold mb-2">Auto-Generated Clinical Note (SOAP)</h2>
+          <div className="border border-gray-600 p-3 rounded text-sm space-y-1">
+            <p><strong>Subjective:</strong> Reports mild stiffness, 0/10 pain at rest, 2/10 during squats.</p>
+            <p><strong>Objective:</strong> Cadence 92 spm (+9), symmetry 8 %, sway 1.8 cm, knee flex ROM 122 °.</p>
+            <p><strong>Assessment:</strong> Progressing per protocol; residual balance deficit.</p>
+            <p><strong>Plan:</strong> Add single-leg RLO weight-shift drill; progress cadence drills; re-test STS in 1 wk.</p>
+          </div>
+        </section>
 
-        {/* Therapy Recommendations */}
-        <div className="bg-gray-800 p-4 rounded-lg space-y-2">
-          <h3 className="font-semibold">Therapy Plan Recommendations</h3>
-          {therapyRecs.length > 0 ? (
-            <ul className="list-disc pl-5 space-y-1">
-              {therapyRecs.map((r, i) => <li key={i}>{r}</li>)}
-            </ul>
-          ) : (
-            <p>Therapist to review</p>
-          )}
-        </div>
+        <section>
+          <h2 className="font-semibold mb-2">Therapy Plan</h2>
+          <div className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-1 border rounded-full px-3 py-1 text-xs">
+              <input type="checkbox" className="form-checkbox" /> Single-Leg Balance (BOSU) – 3 × 30 s
+            </label>
+            <label className="flex items-center gap-1 border rounded-full px-3 py-1 text-xs">
+              <input type="checkbox" className="form-checkbox" /> Metronome Gait Drills – 100 spm × 4 min
+            </label>
+            <label className="flex items-center gap-1 border rounded-full px-3 py-1 text-xs">
+              <input type="checkbox" className="form-checkbox" /> Forward Lunge Step-Backs – 2 × 10 each leg
+            </label>
+            <label className="flex items-center gap-1 border rounded-full px-3 py-1 text-xs">
+              <input type="checkbox" className="form-checkbox" /> Eyes-Closed Tandem Stance – 3 × 20 s
+            </label>
+          </div>
+        </section>
 
-        {/* Export */}
-        <button onClick={() => window.print()} className="no-print px-4 py-2 rounded bg-blue-600 hover:bg-blue-500">Generate PDF for Payer</button>
-
-        {/* Footer */}
-        <div className="print-footer flex items-center justify-between pt-10">
-          <div className="text-sm">Signed ____________________ {new Date().toLocaleDateString()}</div>
-          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=/reports/${patient.id}/${latest.id}.html`} alt="QR" />
-        </div>
+        <section className="space-y-2">
+          <div className="text-sm">CPT suggestions: 97116 (Gait), 97112 (Neuromuscular), 97530 (Therapeutic Activity).<br/>ICD-10: S83.511A.</div>
+          <div className="flex items-center justify-between">
+            <svg viewBox="0 0 80 80" className="w-20 h-20 bg-white" aria-label="QR"><rect x="5" y="5" width="20" height="20" fill="black"/><rect x="55" y="5" width="20" height="20" fill="black"/><rect x="5" y="55" width="20" height="20" fill="black"/><rect x="30" y="30" width="10" height="10" fill="black"/><rect x="45" y="45" width="10" height="10" fill="black"/></svg>
+            <div className="text-sm">Therapist __________________ Date ________</div>
+          </div>
+        </section>
       </div>
     </div>
   );
