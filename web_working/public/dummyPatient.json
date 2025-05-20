@@ -1,0 +1,20 @@
+{
+  "patient": {
+    "id": 1,
+    "first_name": "John",
+    "last_name": "Doe",
+    "age": 34,
+    "dx_icd10": "S83.511A",
+    "surgery_date": "2025-04-01"
+  },
+  "sessions": [
+    { "id": 3, "start_ts": "2025-05-01T12:00:00Z" },
+    { "id": 2, "start_ts": "2025-04-24T12:00:00Z" },
+    { "id": 1, "start_ts": "2025-04-17T12:00:00Z" }
+  ],
+  "metrics": [
+    { "session": 1, "cadence": 76, "stride": 21, "symmetry": 28, "double_support": 34, "sway": 3.2 },
+    { "session": 2, "cadence": 83, "stride": 25, "symmetry": 17, "double_support": 33, "sway": 2.4 },
+    { "session": 3, "cadence": 92, "stride": 28, "symmetry": 8, "double_support": 31, "sway": 1.8 }
+  ]
+}
