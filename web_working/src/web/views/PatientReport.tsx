@@ -57,6 +57,43 @@ const mockMetricsData = [
   },
 ];
 
+// Set to true to use the radar chart or false to use static images for all charts
+const useRadarChart = true;
+
+// Data for the radar chart
+const radarData = [
+  {
+    metric: "Cadence",
+    A: 110,
+    B: 130,
+    fullMark: 150,
+  },
+  {
+    metric: "Symmetry",
+    A: 90,
+    B: 95,
+    fullMark: 100,
+  },
+  {
+    metric: "Sway",
+    A: 20,
+    B: 15,
+    fullMark: 35,
+  },
+  {
+    metric: "Load",
+    A: 50,
+    B: 60,
+    fullMark: 100,
+  },
+  {
+    metric: "ROM",
+    A: 70,
+    B: 80,
+    fullMark: 100,
+  },
+];
+
 export default function PatientReport() {
   const { id } = useParams<{ id: string }>();
   const [dark, setDark] = useState(true);
@@ -160,15 +197,15 @@ export default function PatientReport() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-gray-800 p-4 rounded-lg">
             <h3 className="font-semibold mb-2">Gait Progress</h3>
-            <img src="/reports/cadence_hist.png" alt="Cadence history" />
+            <img src="./reports/cadence_hist.png" alt="Cadence history" />
           </div>
           <div className="bg-gray-800 p-4 rounded-lg">
             <h3 className="font-semibold mb-2">Symmetry & Support</h3>
-            <img src="/reports/symmetry_hist.png" alt="Symmetry history" />
+            <img src="./reports/symmetry_hist.png" alt="Symmetry history" />
           </div>
           <div className="bg-gray-800 p-4 rounded-lg">
             <h3 className="font-semibold mb-2">Balance Stability</h3>
-            <img src="/reports/sway_hist.png" alt="Sway history" />
+            <img src="./reports/sway_hist.png" alt="Sway history" />
           </div>
         </div>
         <p className="text-xs text-gray-400">Gray dots indicate projected data</p>
@@ -179,36 +216,53 @@ export default function PatientReport() {
           <div className="grid md:grid-cols-3 gap-4">
             <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-center h-48">
               <img
-                src={`/reports/${latest.id}_heatmap.png`}
+                src="./reports/demo_heatmap.png"
                 alt="Heatmap"
                 className="max-h-full"
-                onError={(e) => (e.currentTarget.src = '/reports/demo_heatmap.png')}
               />
             </div>
             <div className="bg-gray-800 rounded-lg p-4 flex flex-col items-center justify-center">
               <img
-                src={`/reports/${latest.id}_cop.png`}
+                src="./reports/demo_cop.png"
                 alt="CoP"
                 className="mb-2"
-                onError={(e) => (e.currentTarget.src = '/reports/demo_cop.png')}
               />
               <span className="text-xs">Center-of-Pressure Path</span>
             </div>
             <div className="bg-gray-800 rounded-lg p-4">
-              <ResponsiveContainer width="100%" height={200}>
-                <RadarChart cx="50%" cy="50%" outerRadius="80%" data={[{
-                  cadence: latest.avg_cadence_spm,
-                  symmetry: latest.avg_symmetry_idx_pct,
-                  sway: latest.avg_sway_vel_cm_s * 10,
-                  load: 50,
-                  rom: 80,
-                }]}> 
-                  <PolarGrid />
-                  <PolarAngleAxis dataKey="metric" />
-                  <PolarRadiusAxis />
-                  <Radar name="Current" dataKey="cadence" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
-                </RadarChart>
-              </ResponsiveContainer>
+              {useRadarChart ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <RadarChart 
+                    cx="50%" 
+                    cy="50%" 
+                    outerRadius="80%" 
+                    data={radarData}
+                  > 
+                    <PolarGrid />
+                    <PolarAngleAxis dataKey="metric" />
+                    <PolarRadiusAxis angle={90} domain={[0, 150]} />
+                    <Radar 
+                      name="Current" 
+                      dataKey="A" 
+                      stroke="#3b82f6" 
+                      fill="#3b82f6" 
+                      fillOpacity={0.6} 
+                    />
+                    <Radar 
+                      name="Target" 
+                      dataKey="B" 
+                      stroke="#10b981" 
+                      fill="#10b981" 
+                      fillOpacity={0.4} 
+                    />
+                    <Tooltip />
+                  </RadarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-400">Chart data loading...</p>
+                </div>
+              )}
             </div>
           </div>
           <table className="w-full text-sm">
