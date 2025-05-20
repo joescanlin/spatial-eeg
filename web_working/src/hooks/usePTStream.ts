@@ -146,11 +146,12 @@ export function usePTStream(activeView?: string) {
     };
   }, [client, status]);
   
-  const startExercise = (type: string) => {
+  const startExercise = (type: string, customExercise?: any) => {
     if (client && status === 'connected') {
       client.publish('pt/exercise/command', JSON.stringify({
         command: 'start',
-        type
+        type,
+        customExercise
       }));
     } else {
       // Just log the error without exposing it to the UI

@@ -11,11 +11,88 @@ import GaitVariabilityMetric from '../../components/metrics/GaitVariabilityMetri
 import { GridDisplay } from '../../components/GridDisplay';
 import { usePTSession } from '../../hooks/usePTSession';
 import { useDataStream } from '../../hooks/useDataStream';
-import { PTExercisePanel } from '../../components/PTExercisePanel';
+import { PTExercisePanel, CustomExercise } from '../../components/PTExercisePanel';
 import { usePTStream } from '../../hooks/usePTStream';
-import { ChevronRight, ChevronLeft, LayoutGrid, Maximize2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, LayoutGrid, Maximize2, Clock } from 'lucide-react';
 import { useBalanceTraining } from '../../hooks/useBalanceTraining';
 import { BalanceTrainingGuide } from '../../components/BalanceTrainingGuide';
+
+// Exercise Step Guide component
+interface ExerciseStepGuideProps {
+  exercise: CustomExercise;
+  currentStep: number;
+  timeRemaining: number;
+  onStepComplete: () => void;
+  onStop: () => void;
+}
+
+const ExerciseStepGuide: React.FC<ExerciseStepGuideProps> = ({ 
+  exercise, 
+  currentStep, 
+  timeRemaining, 
+  onStepComplete,
+  onStop
+}) => {
+  const step = exercise.steps[currentStep];
+  const progress = (step.duration - timeRemaining) / step.duration * 100;
+  
+  return (
+    <div className="bg-gray-800/80 backdrop-blur-sm p-4 rounded-lg shadow-lg border border-gray-700 w-full max-w-md">
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="font-semibold text-lg">{exercise.name}</h3>
+        <button 
+          onClick={onStop}
+          className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-sm"
+        >
+          Stop
+        </button>
+      </div>
+      
+      <div className="text-sm text-gray-300 mb-4">
+        {exercise.description}
+      </div>
+      
+      <div className="bg-gray-700 p-3 rounded mb-3">
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center">
+            <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-2">
+              {currentStep + 1}
+            </span>
+            <span className="font-medium">
+              Step {currentStep + 1} of {exercise.steps.length}
+            </span>
+          </div>
+          <div className="flex items-center text-gray-300">
+            <Clock className="w-4 h-4 mr-1" />
+            <span>{timeRemaining}s</span>
+          </div>
+        </div>
+        
+        <p className="mb-3 text-white">{step.instruction}</p>
+        
+        <div className="w-full bg-gray-600 h-2 rounded-full overflow-hidden">
+          <div 
+            className="bg-blue-500 h-full transition-all duration-1000"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+      
+      <div className="flex justify-between items-center text-xs text-gray-400">
+        <div>
+          {currentStep > 0 && (
+            <span>Previous: {exercise.steps[currentStep - 1].instruction}</span>
+          )}
+        </div>
+        <div>
+          {currentStep < exercise.steps.length - 1 && (
+            <span>Next: {exercise.steps[currentStep + 1].instruction}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default function PTSessionView() {
   const { gridData, stats } = useDataStream('pt-session');
@@ -52,16 +129,75 @@ export default function PTSessionView() {
   
   const balanceTraining = useBalanceTraining(selectedPatient?.id ?? null);
 
-  const handleStartExercise = (type: string) => {
+  // State for custom exercise
+  const [activeCustomExercise, setActiveCustomExercise] = useState<CustomExercise | null>(null);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  
+  // Handle starting a custom exercise
+  const handleStartExercise = (type: string, customExercise?: CustomExercise) => {
     startExercise(type);
-    if (type === 'balance') {
+    
+    if (customExercise) {
+      setActiveCustomExercise(customExercise);
+      setCurrentStep(0);
+      setTimeRemaining(customExercise.steps[0].duration);
+    } else if (type === 'balance') {
       balanceTraining.start();
     }
   };
 
+  // Handle stopping an exercise
   const handleStopExercise = () => {
     stopExercise();
     balanceTraining.stop();
+    setActiveCustomExercise(null);
+    setCurrentStep(0);
+    setTimeRemaining(0);
+  };
+  
+  // Timer effect for custom exercise steps
+  useEffect(() => {
+    if (!activeCustomExercise || !isExerciseActive) return;
+    
+    const timerId = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev <= 1) {
+          // Move to next step or complete exercise
+          if (currentStep < activeCustomExercise.steps.length - 1) {
+            setCurrentStep(prev => {
+              const nextStep = prev + 1;
+              setTimeRemaining(activeCustomExercise.steps[nextStep].duration);
+              return nextStep;
+            });
+          } else {
+            // Exercise complete
+            stopExercise();
+            setActiveCustomExercise(null);
+            setCurrentStep(0);
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(timerId);
+  }, [activeCustomExercise, isExerciseActive, currentStep, stopExercise]);
+  
+  // Helper to advance to next step manually
+  const handleStepComplete = () => {
+    if (!activeCustomExercise) return;
+    
+    if (currentStep < activeCustomExercise.steps.length - 1) {
+      setCurrentStep(prev => prev + 1);
+      setTimeRemaining(activeCustomExercise.steps[currentStep + 1].duration);
+    } else {
+      // Exercise complete
+      stopExercise();
+      setActiveCustomExercise(null);
+      setCurrentStep(0);
+    }
   };
   
   // Add logging to track session state
@@ -239,6 +375,7 @@ export default function PTSessionView() {
                   onStart={handleStartExercise}
                   onStop={handleStopExercise}
                   isConnected={isConnected}
+                  isFullscreen={false}
                 />
               </div>
               
@@ -265,12 +402,25 @@ export default function PTSessionView() {
           <div className="h-[700px] relative">
             <GridDisplay data={gridData} />
             <div className="absolute top-4 right-4">
-              <BalanceTrainingGuide
-                active={balanceTraining.active}
-                stepText={balanceTraining.stepText}
-                progress={balanceTraining.progress}
-                onStop={balanceTraining.stop}
-              />
+              {/* Show Balance Training Guide or Custom Exercise Guide based on what's active */}
+              {balanceTraining.active && (
+                <BalanceTrainingGuide
+                  active={balanceTraining.active}
+                  stepText={balanceTraining.stepText}
+                  progress={balanceTraining.progress}
+                  onStop={balanceTraining.stop}
+                />
+              )}
+              
+              {activeCustomExercise && isExerciseActive && (
+                <ExerciseStepGuide
+                  exercise={activeCustomExercise}
+                  currentStep={currentStep}
+                  timeRemaining={timeRemaining}
+                  onStepComplete={handleStepComplete}
+                  onStop={handleStopExercise}
+                />
+              )}
             </div>
           </div>
           
@@ -496,6 +646,7 @@ export default function PTSessionView() {
                 onStart={handleStartExercise}
                 onStop={handleStopExercise}
                 isConnected={isConnected}
+                isFullscreen={true}
               />
             </div>
             
