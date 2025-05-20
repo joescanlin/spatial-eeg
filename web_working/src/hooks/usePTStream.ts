@@ -10,6 +10,10 @@ export interface PTMetrics {
   exerciseCompletion: number;
   repCount: number;
   timestamp: string;
+  copArea: number; // center of pressure area in cm²
+  leftLoadPct: number; // left side load distribution percentage
+  rightLoadPct: number; // right side load distribution percentage
+  swayVelocity: number; // sway velocity in cm/s
 }
 
 export function usePTStream(activeView?: string) {
@@ -23,7 +27,11 @@ export function usePTStream(activeView?: string) {
     rangeOfMotion: 75,
     exerciseCompletion: 0,
     repCount: 0,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    copArea: 0,
+    leftLoadPct: 50,
+    rightLoadPct: 50,
+    swayVelocity: 0
   });
   
   const [isExerciseActive, setIsExerciseActive] = useState(false);

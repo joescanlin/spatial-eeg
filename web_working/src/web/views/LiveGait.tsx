@@ -24,6 +24,10 @@ interface PTMetric {
   cadence: number;
   symmetry: number;
   stepLengthSymmetry: number;
+  copArea: number;
+  leftLoadPct: number;
+  rightLoadPct: number;
+  swayVelocity: number;
 }
 
 // Maximum number of data points to keep in history
@@ -64,7 +68,11 @@ export default function LiveGait() {
           timestamp, 
           cadence, 
           symmetry,
-          stepLengthSymmetry
+          stepLengthSymmetry,
+          copArea: Math.random() * 10, // Mock value between 0-10 cm²
+          leftLoadPct: Math.random() * 100,
+          rightLoadPct: Math.random() * 100,
+          swayVelocity: Math.random() * 4 // Mock value between 0-4 cm/s
         }];
         
         // Keep only MAX_DATA_POINTS most recent points
@@ -85,7 +93,11 @@ export default function LiveGait() {
         timestamp: now - (19 - i) * 1000, // 1 second intervals
         cadence: 110 + Math.random() * 10,
         symmetry: 80 + Math.random() * 10,
-        stepLengthSymmetry: 90 + Math.random() * 10 // 90-100% range for step length symmetry
+        stepLengthSymmetry: 90 + Math.random() * 10, // 90-100% range for step length symmetry
+        copArea: Math.random() * 10, // Mock value between 0-10 cm²
+        leftLoadPct: Math.random() * 100,
+        rightLoadPct: Math.random() * 100,
+        swayVelocity: Math.random() * 4 // Mock value between 0-4 cm/s
       }));
       setMetricsHistory(mockData);
     }
@@ -221,6 +233,136 @@ export default function LiveGait() {
                 <span>0%</span>
                 <span>50%</span>
                 <span>100%</span>
+              </div>
+            </div>
+          </div>
+        </CollapsiblePanel>
+
+        {/* CoP Area panel */}
+        <CollapsiblePanel
+          title="CoP Area"
+          subtitle={`${Math.round(ptMetrics.copArea || 0)} cm²`}
+          icon={<Activity className="w-6 h-6 text-orange-500" />}
+          defaultExpanded={true}
+        >
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-3xl font-bold text-orange-500 mb-2">
+              {Math.round(ptMetrics.copArea || 0)} cm²
+            </div>
+            <div className="text-gray-400 text-sm">center of pressure area</div>
+            
+            <div className="mt-4">
+              <div className="flex justify-between text-sm text-gray-400 mb-1">
+                <span>Stable</span>
+                <span>High Sway</span>
+              </div>
+              <div className="relative h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className={`absolute h-full ${(ptMetrics.copArea || 0) > 10 ? 'bg-red-500' : 'bg-orange-500'}`}
+                  style={{ 
+                    width: `${Math.min(100, ((ptMetrics.copArea || 0) / 10) * 100)}%`,
+                    transition: 'width 0.5s ease-in-out'
+                  }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0</span>
+                <span className="text-xs">10 cm² (alert)</span>
+                <span>20 cm²</span>
+              </div>
+            </div>
+          </div>
+        </CollapsiblePanel>
+
+        {/* Load Distribution panel */}
+        <CollapsiblePanel
+          title="Load Distribution"
+          subtitle={`${Math.round(ptMetrics.leftLoadPct)}/${Math.round(ptMetrics.rightLoadPct)}`}
+          icon={<Activity className="w-6 h-6 text-blue-500" />}
+          defaultExpanded={true}
+        >
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-2xl font-bold text-blue-500">
+                {Math.round(ptMetrics.leftLoadPct)}%
+                <span className="text-gray-400 text-sm ml-1">Left</span>
+              </div>
+              <div className="text-2xl font-bold text-blue-500">
+                {Math.round(ptMetrics.rightLoadPct)}%
+                <span className="text-gray-400 text-sm ml-1">Right</span>
+              </div>
+            </div>
+            <div className="text-gray-400 text-sm text-center">weight distribution</div>
+            
+            <div className="mt-4">
+              <div className="flex justify-between text-sm text-gray-400 mb-1">
+                <span>Left Dominant</span>
+                <span>Balanced</span>
+                <span>Right Dominant</span>
+              </div>
+              <div className="relative h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className={`absolute h-full ${
+                    Math.abs(ptMetrics.leftLoadPct - 50) > 15 ? 'bg-red-500' : 'bg-blue-500'
+                  }`}
+                  style={{ 
+                    width: '100%',
+                    clipPath: `inset(0 ${100 - ptMetrics.leftLoadPct}% 0 0)`,
+                    transition: 'clip-path 0.5s ease-in-out'
+                  }}
+                />
+                <div 
+                  className={`absolute h-full ${
+                    Math.abs(ptMetrics.rightLoadPct - 50) > 15 ? 'bg-red-500' : 'bg-blue-500'
+                  }`}
+                  style={{ 
+                    width: '100%',
+                    clipPath: `inset(0 0 0 ${100 - ptMetrics.rightLoadPct}%)`,
+                    transition: 'clip-path 0.5s ease-in-out'
+                  }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>35%</span>
+                <span className="text-xs">50/50 (ideal)</span>
+                <span>65%</span>
+              </div>
+            </div>
+          </div>
+        </CollapsiblePanel>
+
+        {/* Sway Velocity panel */}
+        <CollapsiblePanel
+          title="Sway Velocity"
+          subtitle={`${ptMetrics.swayVelocity.toFixed(1)} cm/s`}
+          icon={<Activity className="w-6 h-6 text-purple-500" />}
+          defaultExpanded={true}
+        >
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-3xl font-bold text-purple-500 mb-2">
+              {ptMetrics.swayVelocity.toFixed(1)}
+              <span className="text-lg ml-1">cm/s</span>
+            </div>
+            <div className="text-gray-400 text-sm">center of pressure velocity</div>
+            
+            <div className="mt-4">
+              <div className="flex justify-between text-sm text-gray-400 mb-1">
+                <span>Stable</span>
+                <span>Fall Risk</span>
+              </div>
+              <div className="relative h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className={`absolute h-full ${ptMetrics.swayVelocity > 2 ? 'bg-red-500' : 'bg-purple-500'}`}
+                  style={{ 
+                    width: `${Math.min(100, (ptMetrics.swayVelocity / 4) * 100)}%`,
+                    transition: 'width 0.5s ease-in-out'
+                  }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0</span>
+                <span className="text-xs">2 cm/s (risk)</span>
+                <span>4 cm/s</span>
               </div>
             </div>
           </div>

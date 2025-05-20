@@ -40,6 +40,9 @@ interface SessionMetrics {
   // New metric: Gait Variability (Cadence CV)
   cadenceVariability: number; // coefficient of variation as percentage
   
+  // New metric: CoP Area
+  copArea: number; // center of pressure area in cm²
+  
   // Other metrics
   symmetry: number;
   
@@ -369,6 +372,9 @@ export function usePTSession() {
           
           // New metric: Gait Variability (Cadence CV)
           cadenceVariability: cadenceVariability || 2 + Math.random() * 2,
+          
+          // New metric: CoP Area
+          copArea: Math.random() * 100, // Placeholder for CoP Area
           
           // Other metrics
           symmetry: gridData.gaitMetrics.symmetryScore * 100, // Convert to percentage

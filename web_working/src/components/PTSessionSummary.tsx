@@ -21,6 +21,10 @@ interface SessionMetrics {
   rightStepLength?: number;
   stepLengthSymmetry?: number;
   cadenceVariability?: number;
+  copArea?: number;
+  leftLoadPct?: number;
+  rightLoadPct?: number;
+  swayVelocity?: number;
   symmetry: number;
   metricStatus?: {
     [key: string]: 'normal' | 'low' | 'high' | 'none';
@@ -72,7 +76,11 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
         leftStepLength: 0,
         rightStepLength: 0,
         stepLengthSymmetry: 0,
-        cadenceVariability: 0
+        cadenceVariability: 0,
+        copArea: 0,
+        leftLoadPct: 50,
+        rightLoadPct: 50,
+        swayVelocity: 0
       };
     }
     
@@ -90,7 +98,11 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
         leftStepLength: acc.leftStepLength + (metric.leftStepLength || 0),
         rightStepLength: acc.rightStepLength + (metric.rightStepLength || 0),
         stepLengthSymmetry: acc.stepLengthSymmetry + (metric.stepLengthSymmetry || 0),
-        cadenceVariability: acc.cadenceVariability + (metric.cadenceVariability || 0)
+        cadenceVariability: acc.cadenceVariability + (metric.cadenceVariability || 0),
+        copArea: acc.copArea + (metric.copArea || 0),
+        leftLoadPct: acc.leftLoadPct + (metric.leftLoadPct || 50),
+        rightLoadPct: acc.rightLoadPct + (metric.rightLoadPct || 50),
+        swayVelocity: acc.swayVelocity + (metric.swayVelocity || 0)
       };
     }, {
       balanceScore: 0,
@@ -105,7 +117,11 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
       leftStepLength: 0,
       rightStepLength: 0,
       stepLengthSymmetry: 0,
-      cadenceVariability: 0
+      cadenceVariability: 0,
+      copArea: 0,
+      leftLoadPct: 0,
+      rightLoadPct: 0,
+      swayVelocity: 0
     });
     
     return {
@@ -121,7 +137,11 @@ export function PTSessionSummary({ metrics, isSessionActive, selectedMetrics }: 
       leftStepLength: Math.round(sums.leftStepLength / validMetrics.length),
       rightStepLength: Math.round(sums.rightStepLength / validMetrics.length),
       stepLengthSymmetry: Number((sums.stepLengthSymmetry / validMetrics.length).toFixed(1)),
-      cadenceVariability: Number((sums.cadenceVariability / validMetrics.length).toFixed(1))
+      cadenceVariability: Number((sums.cadenceVariability / validMetrics.length).toFixed(1)),
+      copArea: Number((sums.copArea / validMetrics.length).toFixed(1)),
+      leftLoadPct: Number((sums.leftLoadPct / validMetrics.length).toFixed(1)),
+      rightLoadPct: Number((sums.rightLoadPct / validMetrics.length).toFixed(1)),
+      swayVelocity: Number((sums.swayVelocity / validMetrics.length).toFixed(2))
     };
   }, [validMetrics]);
   

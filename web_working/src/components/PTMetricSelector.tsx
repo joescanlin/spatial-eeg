@@ -69,6 +69,42 @@ export const availableMetrics: PTMetricDefinition[] = [
       high: 4 // CV > 4% is risky in older adults
     },
     defaultEnabled: true
+  },
+  {
+    id: 'copArea',
+    name: 'CoP Area (Convex Hull)',
+    description: 'Area covered by center of pressure movement',
+    clinicalValue: 'Postural stability',
+    computation: 'Area of CoP cloud',
+    unit: 'cm²',
+    thresholds: {
+      high: 10 // > 10 cm² indicates high sway
+    },
+    defaultEnabled: true
+  },
+  {
+    id: 'loadDistribution',
+    name: 'Load Distribution L/R',
+    description: 'Weight distribution between left and right sides',
+    clinicalValue: 'Weight-bearing post-injury',
+    computation: 'Active pixels each side ÷ total',
+    unit: '%',
+    thresholds: {
+      asymmetry: 15 // > 65/35 (15% from 50/50) triggers alert
+    },
+    defaultEnabled: true
+  },
+  {
+    id: 'swayVelocity',
+    name: 'Sway Velocity',
+    description: 'Rate of center of pressure movement',
+    clinicalValue: 'Balance rehab, vestibular',
+    computation: 'Sway path ÷ time',
+    unit: 'cm · s⁻¹',
+    thresholds: {
+      high: 2 // > 2 cm/s indicates fall risk
+    },
+    defaultEnabled: true
   }
   // More metrics will be added later
 ];
