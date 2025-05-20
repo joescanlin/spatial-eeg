@@ -13,7 +13,7 @@ import { usePTSession } from '../../hooks/usePTSession';
 import { useDataStream } from '../../hooks/useDataStream';
 import { PTExercisePanel } from '../../components/PTExercisePanel';
 import { usePTStream } from '../../hooks/usePTStream';
-import { ChevronRight, ChevronLeft, LayoutGrid } from 'lucide-react';
+import { ChevronRight, ChevronLeft, LayoutGrid, Maximize2 } from 'lucide-react';
 import { useBalanceTraining } from '../../hooks/useBalanceTraining';
 import { BalanceTrainingGuide } from '../../components/BalanceTrainingGuide';
 
@@ -131,6 +131,9 @@ export default function PTSessionView() {
   
   // State for full-screen metric selector
   const [metricSelectorFullscreen, setMetricSelectorFullscreen] = useState(false);
+  
+  // State for full-screen exercise panel
+  const [exercisePanelFullscreen, setExercisePanelFullscreen] = useState(false);
 
   // Debug output
   console.log("PTSessionView rendering:", { 
@@ -226,14 +229,27 @@ export default function PTSessionView() {
               </button>
             </div>
             
-            <PTExercisePanel
-              metrics={ptMetrics}
-              isActive={isExerciseActive}
-              exerciseType={exerciseType}
-              onStart={handleStartExercise}
-              onStop={handleStopExercise}
-              isConnected={isConnected}
-            />
+            {/* PT Exercise Panel with fullscreen capability */}
+            <div className="relative">
+              <div className="cursor-pointer">
+                <PTExercisePanel
+                  metrics={ptMetrics}
+                  isActive={isExerciseActive}
+                  exerciseType={exerciseType}
+                  onStart={handleStartExercise}
+                  onStop={handleStopExercise}
+                  isConnected={isConnected}
+                />
+              </div>
+              
+              {/* Button to expand exercise panel to fullscreen */}
+              <button 
+                className="absolute top-3 right-3 bg-gray-700 hover:bg-gray-600 rounded p-1"
+                onClick={() => setExercisePanelFullscreen(true)}
+              >
+                <Maximize2 className="w-4 h-4 text-gray-300" />
+              </button>
+            </div>
             
             <PTSessionNotes
               value={sessionNotes}
@@ -448,6 +464,45 @@ export default function PTSessionView() {
               <button 
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-white"
                 onClick={() => setMetricSelectorFullscreen(false)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Fullscreen exercise panel modal */}
+      {exercisePanelFullscreen && (
+        <div className="fixed inset-0 bg-gray-900/95 z-50 p-6 overflow-y-auto">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold">PT Exercise Control</h2>
+              <button 
+                className="bg-gray-800 hover:bg-gray-700 rounded-full p-2"
+                onClick={() => setExercisePanelFullscreen(false)}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="bg-gray-800 p-6 rounded-lg">
+              <PTExercisePanel
+                metrics={ptMetrics}
+                isActive={isExerciseActive}
+                exerciseType={exerciseType}
+                onStart={handleStartExercise}
+                onStop={handleStopExercise}
+                isConnected={isConnected}
+              />
+            </div>
+            
+            <div className="mt-6 flex justify-end">
+              <button 
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-white"
+                onClick={() => setExercisePanelFullscreen(false)}
               >
                 Done
               </button>

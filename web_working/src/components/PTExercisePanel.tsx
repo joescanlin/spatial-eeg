@@ -1,5 +1,5 @@
-import React from 'react';
-import { Activity, Play, Square, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Activity, Play, Square, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { PTMetrics } from '../hooks/usePTStream';
 import { CollapsiblePanel } from './CollapsiblePanel';
 
@@ -27,6 +27,9 @@ export function PTExercisePanel({
     { id: 'sit-to-stand', name: 'Sit to Stand' },
     { id: 'gait', name: 'Gait Training' }
   ];
+  
+  // State to toggle expanded exercise selection
+  const [showExerciseOptions, setShowExerciseOptions] = useState(false);
 
   return (
     <CollapsiblePanel
@@ -54,30 +57,49 @@ export function PTExercisePanel({
         )}
         
         {/* Exercise controls */}
-        <div className="flex items-center justify-between bg-gray-800 p-3 rounded-md">
-          <span className="text-sm font-medium">
-            {isActive 
-              ? `${exerciseType} (${Math.round(metrics.exerciseCompletion)}% complete)`
-              : 'Select an exercise to begin'}
-          </span>
+        <div className="bg-gray-800 p-3 rounded-md">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">
+              {isActive 
+                ? `${exerciseType} (${Math.round(metrics.exerciseCompletion)}% complete)`
+                : 'Select an exercise to begin'}
+            </span>
+            
+            {isActive ? (
+              <button
+                onClick={onStop}
+                className="flex items-center space-x-1 px-3 py-1 bg-red-600 hover:bg-red-700 rounded-md text-white text-sm"
+              >
+                <Square className="w-4 h-4" />
+                <span>Stop</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowExerciseOptions(!showExerciseOptions)}
+                className="flex items-center space-x-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded-md text-white text-sm"
+              >
+                <span>Select Exercise</span>
+                {showExerciseOptions ? 
+                  <ChevronUp className="w-4 h-4" /> : 
+                  <ChevronDown className="w-4 h-4" />
+                }
+              </button>
+            )}
+          </div>
           
-          {isActive ? (
-            <button
-              onClick={onStop}
-              className="flex items-center space-x-1 px-3 py-1 bg-red-600 hover:bg-red-700 rounded-md text-white text-sm"
-            >
-              <Square className="w-4 h-4" />
-              <span>Stop</span>
-            </button>
-          ) : (
-            <div className="flex space-x-2">
+          {/* Expanded exercise options */}
+          {!isActive && showExerciseOptions && (
+            <div className="mt-3 grid grid-cols-1 gap-2 pt-3 border-t border-gray-700">
               {exerciseTypes.map(ex => (
                 <button
                   key={ex.id}
-                  onClick={() => onStart(ex.id)}
-                  className="flex items-center space-x-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded-md text-white text-xs"
+                  onClick={() => {
+                    onStart(ex.id);
+                    setShowExerciseOptions(false);
+                  }}
+                  className="flex items-center space-x-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-md text-white text-sm w-full text-left"
                 >
-                  <Play className="w-3 h-3" />
+                  <Play className="w-4 h-4 text-blue-400" />
                   <span>{ex.name}</span>
                 </button>
               ))}
