@@ -14,6 +14,8 @@ import PTSessionView from './web/views/PTSessionView';
 import LiveGait from './web/views/LiveGait';
 import PatientDetailView from './web/views/PatientDetailView';
 import PatientReport from './web/views/PatientReport';
+import PatientComparisonView from './web/views/PatientComparisonView';
+import { Cpu, Award, Clock, FileText } from 'lucide-react';
 
 // Define the Patient interface
 interface Patient {
@@ -27,7 +29,7 @@ interface Patient {
 
 function App() {
   // Set PT Dashboard as the default view
-  const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait' | 'patient-report'>('pt-dashboard');
+  const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait' | 'patient-report' | 'patient-comparison'>('pt-dashboard');
   
   // Pass current view to useDataStream
   const { gridData, stats } = useDataStream(view);
@@ -104,6 +106,7 @@ function App() {
       case 'patients':
       case 'patient-detail':
       case 'patient-report':
+      case 'patient-comparison':
         return 'Patients';
       case 'pt-session':
         return 'Session';
@@ -119,7 +122,7 @@ function App() {
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex justify-between items-center">
           <StatusBanner streamName={getStatusName()} status={stats} />
-          <div className="flex space-x-2">
+          <div className="flex flex-wrap gap-2">
             <button 
               className={`px-3 py-1 rounded text-sm ${view === 'dashboard' ? 'bg-blue-600' : 'bg-gray-700'}`}
               onClick={() => changeView('dashboard')}
@@ -153,6 +156,12 @@ function App() {
               }}
             >
               Patients
+            </button>
+            <button
+              className={`px-3 py-1 rounded text-sm ${view === 'patient-comparison' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              onClick={() => changeView('patient-comparison')}
+            >
+              Patient Comparison
             </button>
             <button
               className={`px-3 py-1 rounded text-sm ${view === 'training-data' ? 'bg-blue-600' : 'bg-gray-700'}`}
@@ -195,12 +204,51 @@ function App() {
         )}
         
         {view === 'patients' && (
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-            <h2 className="text-2xl font-bold mb-6">Patient Management</h2>
-            <PatientTable 
-              onSelect={handleSelectPatient}
-              onViewReport={handleViewPatientReport}
-            />
+          <div className="space-y-6">
+            {/* Feature highlight card for SOAP Note Generation */}
+            <div className="bg-indigo-900/30 border border-indigo-800 rounded-lg p-6">
+              <div className="flex flex-col md:flex-row md:items-start">
+                <div className="bg-indigo-600 p-3 rounded-lg mb-4 md:mr-4 md:mb-0">
+                  <Cpu className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white mb-2">
+                    New: AI-Powered SOAP Note Generation
+                  </h2>
+                  <p className="text-indigo-200 mb-4">
+                    Our new AI-powered SOAP note generator automatically creates structured clinical documentation
+                    based on your session data, saving you valuable time and improving standardization.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="bg-indigo-800/50 p-3 rounded-lg flex items-center">
+                      <Clock className="w-5 h-5 text-indigo-300 mr-2" />
+                      <span className="text-sm">Save 15+ minutes per patient</span>
+                    </div>
+                    <div className="bg-indigo-800/50 p-3 rounded-lg flex items-center">
+                      <FileText className="w-5 h-5 text-indigo-300 mr-2" />
+                      <span className="text-sm">Standardized documentation</span>
+                    </div>
+                    <div className="bg-indigo-800/50 p-3 rounded-lg flex items-center">
+                      <Award className="w-5 h-5 text-indigo-300 mr-2" />
+                      <span className="text-sm">Medicare/insurance compliant</span>
+                    </div>
+                  </div>
+                  
+                  <div className="text-sm text-indigo-200">
+                    To try it, select a patient from the list below and click on any session to see the AI-generated SOAP note.
+                  </div>
+                </div>
+              </div>
+            </div>
+          
+            <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+              <h2 className="text-2xl font-bold mb-6">Patient Management</h2>
+              <PatientTable 
+                onSelect={handleSelectPatient}
+                onViewReport={handleViewPatientReport}
+              />
+            </div>
           </div>
         )}
 
@@ -234,6 +282,12 @@ function App() {
         {view === 'live-gait' && (
           <div className="w-full">
             <LiveGait />
+          </div>
+        )}
+        
+        {view === 'patient-comparison' && (
+          <div className="w-full">
+            <PatientComparisonView />
           </div>
         )}
       </div>
