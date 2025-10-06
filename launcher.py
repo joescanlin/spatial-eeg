@@ -29,6 +29,11 @@ WEB_WORKING_DIR = os.path.join(BASE_DIR, 'web_working')
 BACKEND_SCRIPT = os.path.join(WEB_WORKING_DIR, 'server.py')
 LOG_FILE = os.path.join(BASE_DIR, 'launcher.log')
 
+# Virtual environment Python (prefer venv if it exists)
+VENV_PYTHON = os.path.join(BASE_DIR, 'venv', 'bin', 'python')
+if not os.path.exists(VENV_PYTHON):
+    VENV_PYTHON = sys.executable  # Fallback to system Python
+
 def log(message):
     """Simple logging"""
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -83,9 +88,10 @@ def start_backend():
 
     try:
         log("Starting backend...")
+        log(f"Using Python: {VENV_PYTHON}")
         # Start backend in background
         backend_process = subprocess.Popen(
-            [sys.executable, BACKEND_SCRIPT],
+            [VENV_PYTHON, BACKEND_SCRIPT],
             cwd=WEB_WORKING_DIR,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -93,13 +99,19 @@ def start_backend():
         )
 
         # Wait for backend to start
-        for i in range(30):  # Wait up to 30 seconds
+        for i in range(60):  # Wait up to 60 seconds (backend may be connecting to MQTT)
             if is_backend_running():
                 log("Backend started successfully")
                 return True
             time.sleep(1)
 
-        log("Backend failed to start (timeout)")
+            # Check if process crashed
+            if backend_process.poll() is not None:
+                log(f"Backend process exited with code {backend_process.returncode}")
+                return False
+
+        log("Backend failed to start (timeout after 60s)")
+        log("Note: Backend may be waiting for MQTT broker connection")
         return False
     except Exception as e:
         log(f"Error starting backend: {e}")
