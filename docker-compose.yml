@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  spatial-eeg:
+    build: .
+    container_name: spatial-eeg-system
+    ports:
+      - "3000:3000"  # Launcher control panel
+      - "5000:5000"  # Frontend
+      - "5001:5001"  # Backend
+    volumes:
+      # Persist logs
+      - ./logs:/app/logs
+      - ./web_working/logs:/app/web_working/logs
+      # Persist session data
+      - ./session_data:/app/session_data
+    environment:
+      # Optional: Add environment variables here
+      - PYTHONUNBUFFERED=1
+    network_mode: host  # Use host network to access basestations via mDNS
+    restart: unless-stopped
