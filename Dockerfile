@@ -31,7 +31,9 @@ COPY . .
 
 # Install frontend dependencies
 WORKDIR /app/web_working
-RUN npm install
+RUN npm cache clean --force && \
+    npm install --legacy-peer-deps --verbose || \
+    npm install --legacy-peer-deps --verbose
 
 # Back to app root
 WORKDIR /app
