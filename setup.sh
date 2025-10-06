@@ -1,10 +1,8 @@
 #!/bin/bash
 
 # Spatial EEG System - Installation Script
-# This script sets up the complete system on Ubuntu with proper virtual environment
+# This script sets up the launcher and frontend first, then backend dependencies
 # Usage: ./setup.sh
-
-set -e  # Exit on error
 
 echo "=========================================="
 echo "Spatial EEG System - Installation"
@@ -73,76 +71,120 @@ print_status "git is installed ($(git --version))"
 
 echo ""
 
+# Install system dependencies for heavy Python packages (optional, don't fail if can't install)
+echo "Checking system dependencies for Python packages..."
+if command_exists apt-get; then
+    echo "Attempting to install system dependencies (requires sudo)..."
+    echo "If this fails, the launcher will still work but backend may need manual dependency installation."
+    sudo apt-get update -qq 2>/dev/null || print_warning "Could not update apt cache"
+    sudo apt-get install -y build-essential python3-dev libpq-dev 2>/dev/null && print_status "System dependencies installed" || print_warning "Could not install all system dependencies (this is OK for now)"
+else
+    print_warning "apt-get not available, skipping system dependencies"
+fi
+echo ""
+
 # Create Python virtual environment
-echo "Creating Python virtual environment..."
+echo "Creating Python virtual environment for launcher..."
 if [ -d "$INSTALL_DIR/venv" ]; then
     print_warning "Virtual environment already exists, skipping creation"
 else
-    python3 -m venv "$INSTALL_DIR/venv"
+    python3 -m venv "$INSTALL_DIR/venv" || {
+        print_error "Failed to create virtual environment"
+        exit 1
+    }
     print_status "Virtual environment created"
 fi
 echo ""
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-source "$INSTALL_DIR/venv/bin/activate"
+source "$INSTALL_DIR/venv/bin/activate" || {
+    print_error "Failed to activate virtual environment"
+    exit 1
+}
 print_status "Virtual environment activated"
 echo ""
 
 # Upgrade pip in venv
 echo "Upgrading pip..."
-pip install --upgrade pip
-print_status "pip upgraded"
+pip install --upgrade pip --quiet || print_warning "Could not upgrade pip (continuing anyway)"
+print_status "pip ready"
 echo ""
 
-# Install Python dependencies
-echo "Installing Python dependencies..."
-if [ -f "$INSTALL_DIR/requirements.txt" ]; then
-    pip install -r "$INSTALL_DIR/requirements.txt"
-    print_status "Main Python dependencies installed"
+# Install LAUNCHER dependencies first (minimal, must succeed)
+echo "Installing launcher dependencies (essential)..."
+if [ -f "$INSTALL_DIR/requirements-launcher.txt" ]; then
+    pip install -r "$INSTALL_DIR/requirements-launcher.txt" || {
+        print_error "Failed to install launcher dependencies. Cannot continue."
+        exit 1
+    }
+    print_status "Launcher dependencies installed successfully"
 else
-    print_warning "requirements.txt not found, skipping main dependencies"
+    print_warning "requirements-launcher.txt not found, installing manually..."
+    pip install flask flask-cors psutil requests || {
+        print_error "Failed to install launcher dependencies. Cannot continue."
+        exit 1
+    }
+    print_status "Launcher dependencies installed successfully"
 fi
+echo ""
 
-# Install backend dependencies if they exist
+# Install BACKEND dependencies (optional, can fail - backend will install on first run)
+echo "Installing backend dependencies (optional - may take 5-10 minutes)..."
+echo "Note: If this fails, the launcher will still work. Backend dependencies can be installed later."
+if [ -f "$INSTALL_DIR/requirements.txt" ]; then
+    echo "This may take a while (TensorFlow, numpy, pandas, etc.)..."
+    pip install -r "$INSTALL_DIR/requirements.txt" && print_status "Backend dependencies installed successfully" || {
+        print_warning "Some backend dependencies failed to install"
+        print_warning "The launcher will still work. The backend will attempt to install missing packages on first run."
+    }
+else
+    print_warning "requirements.txt not found, skipping backend dependencies"
+fi
+echo ""
+
+# Install additional backend requirements if they exist
 if [ -f "$INSTALL_DIR/src/backend/requirements.txt" ]; then
-    pip install -r "$INSTALL_DIR/src/backend/requirements.txt"
-    print_status "Backend dependencies installed"
+    echo "Installing additional backend dependencies..."
+    pip install -r "$INSTALL_DIR/src/backend/requirements.txt" && print_status "Additional backend dependencies installed" || print_warning "Some additional dependencies failed (this is OK)"
 fi
-
-# Install launcher dependencies (always needed)
-echo "Installing launcher dependencies..."
-pip install flask flask-cors psutil requests
-print_status "Launcher dependencies installed"
-echo ""
-
-# Install frontend dependencies
-echo "Installing frontend dependencies..."
-cd "$INSTALL_DIR/web_working"
-npm install
-print_status "Frontend dependencies installed"
-cd "$INSTALL_DIR"
-echo ""
 
 # Deactivate venv (setup is done)
 deactivate
 
+# Install frontend dependencies
+echo "Installing frontend dependencies..."
+cd "$INSTALL_DIR/web_working" || {
+    print_error "web_working directory not found"
+    exit 1
+}
+npm install || {
+    print_error "npm install failed"
+    exit 1
+}
+print_status "Frontend dependencies installed"
+cd "$INSTALL_DIR"
+echo ""
+
 # Create desktop shortcut
 echo "Creating desktop shortcut..."
+mkdir -p "$HOME/Desktop" 2>/dev/null
 DESKTOP_FILE="$HOME/Desktop/Spatial-EEG-System.desktop"
 
-cat > "$DESKTOP_FILE" << DESKTOPEOF
+cat > "$DESKTOP_FILE" << 'DESKTOPEOF'
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=Spatial EEG System
 Comment=Launch Spatial EEG Research Platform
-Exec=bash -c "cd $INSTALL_DIR && source venv/bin/activate && python launcher.py"
+Exec=bash -c "cd %INSTALL_DIR% && source venv/bin/activate && python launcher.py"
 Icon=applications-science
 Terminal=false
 Categories=Science;Education;
 DESKTOPEOF
 
+# Replace placeholder with actual path
+sed -i "s|%INSTALL_DIR%|$INSTALL_DIR|g" "$DESKTOP_FILE"
 chmod +x "$DESKTOP_FILE"
 
 # Try to mark as trusted (Ubuntu-specific)
@@ -161,7 +203,9 @@ cd "$(dirname "$0")"
 echo "Starting Spatial EEG System Launcher..."
 echo "Activating virtual environment..."
 source venv/bin/activate
+echo ""
 echo "Control Panel will be available at: http://localhost:3000"
+echo "Press Ctrl+C to stop the launcher"
 echo ""
 python launcher.py
 STARTEOF
@@ -179,27 +223,25 @@ echo "=========================================="
 echo "Installation Complete!"
 echo "=========================================="
 echo ""
+echo "✓ Launcher dependencies: Installed"
+echo "✓ Frontend dependencies: Installed"
+echo "✓ Desktop shortcut: Created"
+echo "✓ Virtual environment: Ready"
+echo ""
 echo "Next steps:"
 echo ""
-echo "1. Desktop shortcut has been created on your desktop"
-echo "   Double-click 'Spatial EEG System' icon to launch"
-echo ""
-echo "OR manually start the launcher:"
+echo "1. Start the launcher:"
 echo "   ./start.sh"
 echo ""
-echo "OR start directly with Python (remember to activate venv first):"
-echo "   source venv/bin/activate"
-echo "   python launcher.py"
+echo "   OR double-click the 'Spatial EEG System' icon on your desktop"
 echo ""
-echo "Once launched:"
-echo "   - The launcher control panel will open at http://localhost:3000"
-echo "   - Click 'Start System' to start the backend and frontend"
-echo "   - Basestation connection status will be displayed"
-echo "   - Access the main application at http://localhost:5000"
+echo "2. Open your browser to: http://localhost:3000"
 echo ""
-echo "To update the system in the future:"
-echo "   git pull origin main"
-echo "   ./setup.sh  (to update dependencies)"
-echo "   Or use the 'Check for Updates' button in the control panel"
+echo "3. Click 'Start System' to launch backend and frontend"
 echo ""
-print_status "Setup complete! Ready to use."
+echo "4. View basestation connection status in the control panel"
+echo ""
+echo "5. Access the main application at: http://localhost:5000"
+echo ""
+print_status "Setup complete! Ready to launch."
+echo ""
