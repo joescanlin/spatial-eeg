@@ -207,16 +207,20 @@ logger.info(f"Port: {MQTT_PORT}")
 logger.info(f"Raw Data Topic: {RAW_DATA_TOPIC}")
 logger.info(f"Alerts Topic: {ALERTS_TOPIC}")
 
-# Mobile Text Alerts Configuration
+# Mobile Text Alerts Configuration (optional)
 MOBILE_TEXT_ALERTS_KEY = os.getenv('MOBILE_TEXT_ALERTS_KEY')
 MOBILE_TEXT_ALERTS_V3_URL = os.getenv('MOBILE_TEXT_ALERTS_V3_URL')
 MOBILE_TEXT_ALERTS_FROM = os.getenv('MOBILE_TEXT_ALERTS_FROM')
-MOBILE_TEXT_ALERTS_GROUP = int(os.getenv('MOBILE_TEXT_ALERTS_GROUP'))
+MOBILE_TEXT_ALERTS_GROUP = os.getenv('MOBILE_TEXT_ALERTS_GROUP')
 
-logger.info("Mobile Text Alerts Configuration:")
-logger.info(f"API Key: {MOBILE_TEXT_ALERTS_KEY[:8]}...")
-logger.info(f"From Number: {MOBILE_TEXT_ALERTS_FROM}")
-logger.info(f"Alert Group: {MOBILE_TEXT_ALERTS_GROUP}")
+if MOBILE_TEXT_ALERTS_KEY and MOBILE_TEXT_ALERTS_GROUP:
+    MOBILE_TEXT_ALERTS_GROUP = int(MOBILE_TEXT_ALERTS_GROUP)
+    logger.info("Mobile Text Alerts Configuration:")
+    logger.info(f"API Key: {MOBILE_TEXT_ALERTS_KEY[:8]}...")
+    logger.info(f"From Number: {MOBILE_TEXT_ALERTS_FROM}")
+    logger.info(f"Alert Group: {MOBILE_TEXT_ALERTS_GROUP}")
+else:
+    logger.info("Mobile Text Alerts not configured (optional feature disabled)")
 
 # Rate limit tracking
 last_sms_time = 0
@@ -340,17 +344,22 @@ def get_dedicated_number_id():
 
 def send_mobile_text_alert(message, confidence=None):
     """Send an SMS alert using Mobile Text Alerts API v3."""
+    # Check if Mobile Text Alerts is configured
+    if not (MOBILE_TEXT_ALERTS_KEY and MOBILE_TEXT_ALERTS_GROUP):
+        logger.debug("Mobile Text Alerts not configured, skipping SMS")
+        return False
+
     try:
         # Create a shorter message for alert history
         alert_message = f"Fall detected with {confidence * 100:.0f}% confidence" if confidence else message
-        
+
         # Use v3 payload structure with group
         payload = {
             'message': message,
-            'groups': [MOBILE_TEXT_ALERTS_GROUP],  # Send to configured group
+            'groups': [int(MOBILE_TEXT_ALERTS_GROUP)],  # Send to configured group
             'dedicatedNumber': MOBILE_TEXT_ALERTS_FROM  # Use the toll-free number directly
         }
-        
+
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {MOBILE_TEXT_ALERTS_KEY}'
