@@ -303,6 +303,14 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Basestation Status -->
+            <div id="basestation-status-section" style="display: none; margin-top: 20px;">
+                <h3 style="font-size: 16px; margin-bottom: 10px; color: #555;">Basestation Connections</h3>
+                <div class="status-grid" id="basestation-status-grid">
+                    <!-- Dynamically populated -->
+                </div>
+            </div>
         </div>
 
         <!-- System Controls -->
@@ -405,6 +413,34 @@
                 } else {
                     frontendStatus.innerHTML = '<span class="status-dot dot-offline"></span> Offline';
                     frontendStatus.className = 'status-value status-offline';
+                }
+
+                // Update basestation status
+                const basestations = data.basestations || {};
+                const basestationSection = document.getElementById('basestation-status-section');
+                const basestationGrid = document.getElementById('basestation-status-grid');
+
+                if (data.backend && Object.keys(basestations).length > 0) {
+                    basestationSection.style.display = 'block';
+                    basestationGrid.innerHTML = Object.entries(basestations)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([id, status]) => {
+                            const connected = status.connected;
+                            const statusClass = connected ? 'status-online' : 'status-offline';
+                            const dotClass = connected ? 'dot-online' : 'dot-offline';
+                            const statusText = connected ? 'Connected' : 'Offline';
+                            return `
+                                <div class="status-item">
+                                    <div class="status-label">Basestation #${id}</div>
+                                    <div class="status-value ${statusClass}">
+                                        <span class="status-dot ${dotClass}"></span>
+                                        ${statusText}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                } else {
+                    basestationSection.style.display = 'none';
                 }
             } catch (error) {
                 console.error('Error updating status:', error);

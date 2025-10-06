@@ -108,6 +108,10 @@ def start_backend():
             # Check if process crashed
             if backend_process.poll() is not None:
                 log(f"Backend process exited with code {backend_process.returncode}")
+                # Capture and log stderr for debugging
+                stderr_output = backend_process.stderr.read().decode('utf-8') if backend_process.stderr else ""
+                if stderr_output:
+                    log(f"Backend stderr:\n{stderr_output}")
                 return False
 
         log("Backend failed to start (timeout after 60s)")
@@ -262,11 +266,25 @@ def index():
 
 @app.route('/api/status')
 def status():
-    """Get system status"""
+    """Get system status including basestation connections"""
+    backend_running = is_backend_running()
+
+    # If backend is running, try to get basestation status
+    basestations = {}
+    if backend_running:
+        try:
+            import requests
+            response = requests.get('http://localhost:5001/api/basestations/status', timeout=2)
+            if response.status_code == 200:
+                basestations = response.json()
+        except Exception:
+            pass  # Backend not fully initialized yet
+
     return jsonify({
-        'backend': is_backend_running(),
+        'backend': backend_running,
         'frontend': is_frontend_running(),
-        'launcher': True
+        'launcher': True,
+        'basestations': basestations
     })
 
 @app.route('/api/system/start', methods=['POST'])

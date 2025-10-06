@@ -69,8 +69,9 @@ logger.setLevel(logging.DEBUG)
 # Load environment variables
 load_dotenv()
 
-# Load configuration
-with open('config.yaml', 'r') as file:
+# Load configuration (use path relative to this file)
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.yaml')
+with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
 
 app = Flask(__name__)
@@ -94,7 +95,8 @@ CORS(app,
 
 # Global variables
 grid_updates = queue.Queue()
-mqtt_client = None
+mqtt_client = None  # Legacy single broker client
+mqtt_clients = {}  # Dict of basestation MQTT clients: {bs_id: client}
 mqtt_connected = False
 
 # Store alerts in memory
@@ -939,7 +941,14 @@ def session_stop():
         session_writer = None
     active_session_id = None
 
-def on_mqtt_message(client, userdata, message):
+def on_mqtt_message(client, userdata, message, basestation_id=None):
+    """
+    Handle MQTT messages from both legacy single broker and new independent basestations.
+
+    Args:
+        basestation_id: Optional basestation ID for independent broker architecture.
+                       If provided, overrides topic-based extraction.
+    """
     try:
         logger.info(f"Raw MQTT payload received: {message.payload[:100]}...")
         logger.info(f"Received MQTT message on topic: {message.topic}")
@@ -1144,114 +1153,120 @@ def on_mqtt_message(client, userdata, message):
             else:
                 logger.error(f"Invalid path data format: {type(data)}")
 
-        elif message.topic.startswith("basestation/"):
+        elif basestation_id or message.topic.startswith("basestation/"):
             # Handle multi-basestation frame data
-            # Extract basestation ID from topic (e.g., "basestation/630/frame" -> "630")
-            topic_parts = message.topic.split('/')
-            if len(topic_parts) >= 3 and topic_parts[2] == 'frame':
-                basestation_id = topic_parts[1]
-
-                if basestation_id not in basestation_frames:
-                    logger.warning(f"Unknown basestation ID: {basestation_id}")
+            # Priority 1: Use passed basestation_id (new independent broker architecture)
+            # Priority 2: Extract from topic (legacy central broker architecture)
+            if not basestation_id:
+                # Legacy: extract basestation ID from topic (e.g., "basestation/630/frame" -> "630")
+                topic_parts = message.topic.split('/')
+                if len(topic_parts) >= 3 and topic_parts[2] == 'frame':
+                    basestation_id = topic_parts[1]
+                else:
+                    logger.warning(f"Cannot extract basestation ID from topic: {message.topic}")
                     return
 
-                # Extract frame data using same logic as single-device handler
-                frame_data = None
-                if isinstance(data, dict):
-                    if 'payload' in data and 'data' in data['payload']:
-                        frame_data = data['payload']['data']
-                        logger.debug(f"BS #{basestation_id}: Using payload.data format")
-                    elif 'frame' in data:
-                        frame_data = data['frame']
-                        logger.debug(f"BS #{basestation_id}: Using direct frame format")
+            if basestation_id not in basestation_frames:
+                logger.warning(f"Unknown basestation ID: {basestation_id}")
+                return
+
+            # Extract frame data using same logic as single-device handler
+            frame_data = None
+            if isinstance(data, dict):
+                if 'payload' in data and 'data' in data['payload']:
+                    frame_data = data['payload']['data']
+                    logger.debug(f"BS #{basestation_id}: Using payload.data format")
+                elif 'frame' in data:
+                    frame_data = data['frame']
+                    logger.debug(f"BS #{basestation_id}: Using direct frame format")
+                else:
+                    logger.error(f"BS #{basestation_id}: No valid frame data found. Keys: {list(data.keys())}")
+                    return
+            elif isinstance(data, list):
+                frame_data = data
+                logger.debug(f"BS #{basestation_id}: Using direct list format")
+
+            if not isinstance(frame_data, list) or not frame_data:
+                logger.error(f"BS #{basestation_id}: Invalid frame data format: {type(frame_data)}")
+                return
+
+            # Convert to numpy array
+            try:
+                frame_array = np.array(frame_data, dtype=np.float32)
+                expected_shape = (basestation_frames[basestation_id]['height'],
+                                 basestation_frames[basestation_id]['width'])
+
+                # Validate dimensions
+                if frame_array.shape != expected_shape:
+                    if frame_array.shape == (expected_shape[1], expected_shape[0]):
+                        frame_array = frame_array.T
+                        logger.debug(f"BS #{basestation_id}: Transposed frame to match expected dimensions")
                     else:
-                        logger.error(f"BS #{basestation_id}: No valid frame data found. Keys: {list(data.keys())}")
+                        logger.error(f"BS #{basestation_id}: Frame size mismatch: got {frame_array.shape}, expected {expected_shape}")
                         return
-                elif isinstance(data, list):
-                    frame_data = data
-                    logger.debug(f"BS #{basestation_id}: Using direct list format")
 
-                if not isinstance(frame_data, list) or not frame_data:
-                    logger.error(f"BS #{basestation_id}: Invalid frame data format: {type(frame_data)}")
-                    return
+                # Store frame in buffer
+                basestation_frames[basestation_id]['data'] = frame_array
+                basestation_frames[basestation_id]['timestamp'] = time.time()
+                basestation_frames[basestation_id]['connected'] = True
 
-                # Convert to numpy array
-                try:
-                    frame_array = np.array(frame_data, dtype=np.float32)
-                    expected_shape = (basestation_frames[basestation_id]['height'],
-                                     basestation_frames[basestation_id]['width'])
+                logger.info(f"BS #{basestation_id}: Received frame {frame_array.shape}, active sensors: {np.sum(frame_array > 0)}")
 
-                    # Validate dimensions
-                    if frame_array.shape != expected_shape:
-                        if frame_array.shape == (expected_shape[1], expected_shape[0]):
-                            frame_array = frame_array.T
-                            logger.debug(f"BS #{basestation_id}: Transposed frame to match expected dimensions")
-                        else:
-                            logger.error(f"BS #{basestation_id}: Frame size mismatch: got {frame_array.shape}, expected {expected_shape}")
-                            return
+                # Fuse all basestation frames into unified grid
+                unified_grid = fuse_basestation_frames()
+                active_sensors = np.sum(unified_grid > 0)
+                logger.debug(f"Unified grid fused: {unified_grid.shape}, active sensors: {active_sensors}")
 
-                    # Store frame in buffer
-                    basestation_frames[basestation_id]['data'] = frame_array
-                    basestation_frames[basestation_id]['timestamp'] = time.time()
-                    basestation_frames[basestation_id]['connected'] = True
+                t_now = time.time()
 
-                    logger.info(f"BS #{basestation_id}: Received frame {frame_array.shape}, active sensors: {np.sum(frame_array > 0)}")
+                # Get EEG data if available
+                eeg_ui = None
+                if eeg_reader:
+                    with eeg_lock:
+                        latest = eeg_reader.get_latest()
+                        if latest is not None:
+                            eeg_ui = {
+                                't_epoch': latest['t_epoch'],
+                                'vals': latest['vals'].tolist() if hasattr(latest['vals'], 'tolist') else latest['vals'],
+                                'labels': EEG_CFG.get("channel_labels", [])
+                            }
 
-                    # Fuse all basestation frames into unified grid
-                    unified_grid = fuse_basestation_frames()
-                    active_sensors = np.sum(unified_grid > 0)
-                    logger.debug(f"Unified grid fused: {unified_grid.shape}, active sensors: {active_sensors}")
+                # Push unified grid to SSE stream
+                update = {
+                    'grid': unified_grid.tolist(),
+                    'basestations': get_basestation_status(),
+                    'timestamp': datetime.now().isoformat(),
+                    't_epoch': t_now,
+                    'eeg': eeg_ui
+                }
+                grid_updates.put(update)
+                logger.debug(f"Unified grid update sent to SSE stream")
 
-                    t_now = time.time()
+                # Write to session file if active (save unified grid for research)
+                if session_writer and active_session_id:
+                    # Get xy coordinates if available (placeholder for now)
+                    xy = None  # TODO: Extract actual x,y from path tracking if available
 
-                    # Get EEG data if available
-                    eeg_ui = None
-                    if eeg_reader:
-                        with eeg_lock:
-                            latest = eeg_reader.get_latest()
-                            if latest is not None:
-                                eeg_ui = {
-                                    't_epoch': latest['t_epoch'],
-                                    'vals': latest['vals'].tolist() if hasattr(latest['vals'], 'tolist') else latest['vals'],
-                                    'labels': EEG_CFG.get("channel_labels", [])
-                                }
-
-                    # Push unified grid to SSE stream
-                    update = {
+                    # Save unified grid floor data
+                    session_writer.add_floor_frame(t_now, xy, {
                         'grid': unified_grid.tolist(),
                         'basestations': get_basestation_status(),
-                        'timestamp': datetime.now().isoformat(),
-                        't_epoch': t_now,
-                        'eeg': eeg_ui
-                    }
-                    grid_updates.put(update)
-                    logger.debug(f"Unified grid update sent to SSE stream")
+                        'timestamp': datetime.now().isoformat()
+                    })
 
-                    # Write to session file if active (save unified grid for research)
-                    if session_writer and active_session_id:
-                        # Get xy coordinates if available (placeholder for now)
-                        xy = None  # TODO: Extract actual x,y from path tracking if available
+                    # Drain EEG since last write
+                    if eeg_reader:
+                        drained = eeg_reader.drain_since(t_now - 1.0)  # 1 second window
+                        if drained:
+                            session_writer.add_eeg_chunk(drained, EEG_CFG.get("channel_labels", []))
 
-                        # Save unified grid floor data
-                        session_writer.add_floor_frame(t_now, xy, {
-                            'grid': unified_grid.tolist(),
-                            'basestations': get_basestation_status(),
-                            'timestamp': datetime.now().isoformat()
-                        })
+                    logger.debug(f"Session data written: unified grid {unified_grid.shape}")
 
-                        # Drain EEG since last write
-                        if eeg_reader:
-                            drained = eeg_reader.drain_since(t_now - 1.0)  # 1 second window
-                            if drained:
-                                session_writer.add_eeg_chunk(drained, EEG_CFG.get("channel_labels", []))
-
-                        logger.debug(f"Session data written: unified grid {unified_grid.shape}")
-
-                except Exception as e:
-                    logger.error(f"BS #{basestation_id}: Error processing frame: {str(e)}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    return
+            except Exception as e:
+                logger.error(f"BS #{basestation_id}: Error processing frame: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return
 
     except Exception as e:
         logger.error(f"Error in MQTT message handler: {str(e)}")
@@ -1289,12 +1304,9 @@ def on_mqtt_connect(client, userdata, flags, rc):
             ("pt/exercise/type", 0, "PT exercise type"),
             ("pt/exercise/command", 0, "PT exercise commands"),
             ("softbio/prediction", 0, "Soft biometrics predictions"),
-            ("softbio/debug/features", 0, "Soft biometrics debug features"),
-            # Multi-basestation frame data
-            ("basestation/630/frame", 0, "Basestation #630 frame data (40×24)"),
-            ("basestation/631/frame", 0, "Basestation #631 frame data (40×24)"),
-            ("basestation/632/frame", 0, "Basestation #632 frame data (40×30)"),
-            ("basestation/633/frame", 0, "Basestation #633 frame data (40×30)")
+            ("softbio/debug/features", 0, "Soft biometrics debug features")
+            # NOTE: Basestation frame subscriptions moved to setup_basestation_mqtt()
+            # Each basestation now has its own independent MQTT broker connection
         ]
         
         # Subscribe to topics with enhanced logging
@@ -1385,29 +1397,102 @@ def on_disconnect(client, userdata, rc):
         logger.error(f"Failed to reconnect: {e}")
 
 def setup_mqtt():
+    """Setup legacy single MQTT broker connection (for non-basestation topics)"""
     global mqtt_client
     try:
-        logger.info(f"Attempting to connect to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
+        logger.info(f"Attempting to connect to legacy MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
         mqtt_client = mqtt.Client(client_id=f"fall_detector_{int(time.time())}")
         mqtt_client.on_connect = on_mqtt_connect
         mqtt_client.on_message = on_mqtt_message
         mqtt_client.on_disconnect = on_disconnect
-        
+
         # Set up MQTT connection with keep-alive and reconnect settings
         mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
         mqtt_client.loop_start()
-        logger.info("MQTT client setup completed and loop started")
+        logger.info("Legacy MQTT client setup completed and loop started")
         return True
     except Exception as e:
-        logger.error(f"Error setting up MQTT client: {str(e)}")
-        logger.error(f"Error type: {type(e).__name__}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.warning(f"Legacy MQTT broker connection failed (this is OK if using independent basestations): {str(e)}")
         return False
+
+def setup_basestation_mqtt():
+    """Setup independent MQTT connections to each basestation"""
+    global mqtt_clients
+
+    logger.info("=" * 50)
+    logger.info("Setting up independent basestation MQTT connections...")
+    logger.info("=" * 50)
+
+    success_count = 0
+
+    for bs_id, bs_config in BASESTATION_DEVICES.items():
+        broker = bs_config.get('broker')
+        port = bs_config.get('port', 1883)
+        topic = bs_config.get('mqtt_topic', 'controller/networkx/frame/rft')
+
+        if not broker:
+            logger.warning(f"Basestation #{bs_id}: No broker configured, skipping")
+            continue
+
+        try:
+            logger.info(f"Basestation #{bs_id}: Connecting to {broker}:{port}")
+
+            # Create client with unique ID
+            client = mqtt.Client(client_id=f"spatial_eeg_bs{bs_id}_{int(time.time())}")
+
+            # Create connection handler with basestation context
+            def make_on_connect(basestation_id, mqtt_topic):
+                def on_connect(client, userdata, flags, rc):
+                    if rc == 0:
+                        logger.info(f"✅ Basestation #{basestation_id}: Connected successfully")
+                        basestation_frames[basestation_id]['connected'] = True
+                        # Subscribe to this basestation's topic
+                        client.subscribe(mqtt_topic, 0)
+                        logger.info(f"📌 Basestation #{basestation_id}: Subscribed to '{mqtt_topic}'")
+                    else:
+                        logger.error(f"❌ Basestation #{basestation_id}: Connection failed with code {rc}")
+                        basestation_frames[basestation_id]['connected'] = False
+                return on_connect
+
+            # Create message handler with basestation context
+            def make_on_message(basestation_id):
+                def on_message(client, userdata, msg):
+                    # Reuse the existing on_mqtt_message logic
+                    # The message will be processed as if it came from "basestation/{bs_id}/frame"
+                    on_mqtt_message(client, userdata, msg, basestation_id=basestation_id)
+                return on_message
+
+            client.on_connect = make_on_connect(bs_id, topic)
+            client.on_message = make_on_message(bs_id)
+            client.on_disconnect = on_disconnect
+
+            # Attempt connection (non-blocking)
+            client.connect_async(broker, port, keepalive=60)
+            client.loop_start()
+
+            mqtt_clients[bs_id] = client
+            success_count += 1
+            logger.info(f"Basestation #{bs_id}: Client created and connecting...")
+
+        except Exception as e:
+            logger.error(f"Basestation #{bs_id}: Setup error - {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    logger.info("=" * 50)
+    logger.info(f"Basestation MQTT setup complete: {success_count}/{len(BASESTATION_DEVICES)} clients created")
+    logger.info("=" * 50)
+
+    return success_count > 0
 
 @app.route('/api/status')
 def status():
     return "alive"
+
+@app.route('/api/basestations/status')
+def basestations_status():
+    """Get connection status for all basestations"""
+    return jsonify(get_basestation_status())
 
 @app.route('/api/alert-history')
 def get_alert_history():
@@ -1443,14 +1528,15 @@ def mqtt_status():
             'message': str(e)
         }), 500
 
-@app.route('/api/eeg/status')
-def eeg_status():
-    """Get EEG LSL connection status"""
-    ok = bool(eeg_reader and eeg_reader.running)
-    return jsonify({
-        "ok": ok,
-        "stream": EEG_CFG.get("stream_name", "EEG")
-    })
+# NOTE: eeg_status route moved to eeg_flask_routes.py to avoid duplicate registration
+# @app.route('/api/eeg/status')
+# def eeg_status():
+#     """Get EEG LSL connection status"""
+#     ok = bool(eeg_reader and eeg_reader.running)
+#     return jsonify({
+#         "ok": ok,
+#         "stream": EEG_CFG.get("stream_name", "EEG")
+#     })
 
 @app.route('/api/session/start', methods=['POST'])
 def api_session_start():
@@ -2116,7 +2202,7 @@ if __name__ == '__main__':
         logger.info("="*50)
 
         logger.info("Step 1: Loading configuration...")
-        with open('config.yaml', 'r') as file:
+        with open(CONFIG_PATH, 'r') as file:
             config = yaml.safe_load(file)
         logger.info("Configuration loaded successfully")
 
@@ -2128,12 +2214,19 @@ if __name__ == '__main__':
 
         logger.info("\nStep 3: Setting up MQTT client...")
         if not setup_mqtt():
-            logger.error("Failed to setup MQTT client. Exiting...")
-            exit(1)
-        logger.info("MQTT client setup successfully")
+            logger.warning("Legacy MQTT client setup failed (this is OK if using independent basestations)")
+        else:
+            logger.info("Legacy MQTT client setup successfully")
 
-        # Step 3.5: Initialize EEG routes
-        logger.info("\nStep 3.5: Initializing EEG routes...")
+        # Step 3.5: Setup independent basestation MQTT connections
+        logger.info("\nStep 3.5: Setting up basestation MQTT connections...")
+        if not setup_basestation_mqtt():
+            logger.warning("No basestation MQTT clients initialized - check config.yaml")
+        else:
+            logger.info("Basestation MQTT connections initiated")
+
+        # Step 3.6: Initialize EEG routes
+        logger.info("\nStep 3.6: Initializing EEG routes...")
         init_eeg_routes(app)
 
         # Start Cortex in background
