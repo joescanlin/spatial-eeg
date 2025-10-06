@@ -129,14 +129,17 @@ else
 fi
 echo ""
 
-# Install BACKEND dependencies (optional, can fail - backend will install on first run)
+# Install BACKEND dependencies (optional, can fail)
 echo "Installing backend dependencies (optional - may take 5-10 minutes)..."
-echo "Note: If this fails, the launcher will still work. Backend dependencies can be installed later."
+echo "Note: If this fails, the launcher will still work but backend may not start."
+echo "You can manually install backend dependencies later by running:"
+echo "  source venv/bin/activate && pip install -r requirements.txt"
 if [ -f "$INSTALL_DIR/requirements.txt" ]; then
     echo "This may take a while (TensorFlow, numpy, pandas, etc.)..."
     pip install -r "$INSTALL_DIR/requirements.txt" && print_status "Backend dependencies installed successfully" || {
         print_warning "Some backend dependencies failed to install"
-        print_warning "The launcher will still work. The backend will attempt to install missing packages on first run."
+        print_warning "The launcher will work, but you may need to manually install backend dependencies."
+        print_warning "Try: sudo apt install build-essential python3-dev && source venv/bin/activate && pip install -r requirements.txt"
     }
 else
     print_warning "requirements.txt not found, skipping backend dependencies"
@@ -158,11 +161,39 @@ cd "$INSTALL_DIR/web_working" || {
     print_error "web_working directory not found"
     exit 1
 }
-npm install || {
-    print_error "npm install failed"
-    exit 1
-}
-print_status "Frontend dependencies installed"
+
+# Check npm version
+NPM_VERSION=$(npm --version)
+NODE_VERSION=$(node --version)
+echo "Using npm $NPM_VERSION and node $NODE_VERSION"
+
+# Try npm install
+echo "This may take a few minutes (installing React, TypeScript, Vite, etc.)..."
+if npm install; then
+    print_status "Frontend dependencies installed"
+else
+    print_warning "npm install failed, trying with cache clean..."
+    npm cache clean --force 2>/dev/null || true
+
+    if npm install --legacy-peer-deps; then
+        print_status "Frontend dependencies installed (with --legacy-peer-deps)"
+    else
+        print_error "npm install failed"
+        echo ""
+        echo "Troubleshooting steps:"
+        echo "1. Check your npm version (recommended: npm 9+, node 18+)"
+        echo "   Current: npm $NPM_VERSION, node $NODE_VERSION"
+        echo "2. Try manually:"
+        echo "   cd $INSTALL_DIR/web_working"
+        echo "   npm cache clean --force"
+        echo "   npm install --legacy-peer-deps"
+        echo "3. If using old Node.js, update it:"
+        echo "   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+        echo "   sudo apt install -y nodejs"
+        exit 1
+    fi
+fi
+
 cd "$INSTALL_DIR"
 echo ""
 
