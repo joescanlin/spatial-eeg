@@ -8,9 +8,7 @@ import threading
 import logging
 import os
 from dotenv import load_dotenv
-import numpy as np
 import time
-from fall_detection.fall_detector import FallDetector
 from collections import deque
 import yaml
 import requests  # Add requests for Mobile Text Alerts API
@@ -18,19 +16,46 @@ import traceback
 import random
 import logging.handlers
 import uuid
-
-# Import soft biometrics components
-from softbio.feature_extractor import GaitFeatureExtractor
-from softbio.baseline_model import SoftBioBaseline
-
-# Import EEG components
 from threading import Lock
 import sys
-import os
-# Add parent directory to path to import from src
+
+# Optional ML dependencies - only needed for fall detection
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    print("numpy not installed. Fall detection and soft biometrics not available.")
+    NUMPY_AVAILABLE = False
+    np = None
+
+try:
+    from fall_detection.fall_detector import FallDetector
+    FALL_DETECTOR_AVAILABLE = True
+except ImportError:
+    print("Fall detection module not available (missing dependencies).")
+    FALL_DETECTOR_AVAILABLE = False
+    FallDetector = None
+
+try:
+    from softbio.feature_extractor import GaitFeatureExtractor
+    from softbio.baseline_model import SoftBioBaseline
+    SOFTBIO_AVAILABLE = True
+except ImportError:
+    print("Soft biometrics not available (missing dependencies).")
+    SOFTBIO_AVAILABLE = False
+    GaitFeatureExtractor = None
+    SoftBioBaseline = None
+
+# EEG/LSL dependencies (required for this application)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.utils.lsl_client import LSLReader
-from src.utils.session_writer import SessionWriter
+try:
+    from src.utils.lsl_client import LSLReader
+    from src.utils.session_writer import SessionWriter
+except ImportError as e:
+    print(f"pylsl not installed. LSL streaming not available.")
+    LSLReader = None
+    SessionWriter = None
+
 from eeg_flask_routes import init_eeg_routes, start_cortex_in_thread
 
 # Create logs directory if it doesn't exist
@@ -238,26 +263,29 @@ def init_detector_and_buffers():
         fall_probability = 0.0
         fall_in_progress = False
 
-        # Initialize soft biometrics components
-        logger.info("Initializing soft biometrics components...")
-        try:
-            # Load softbio configuration
-            with open('softbio/config/softbio.yaml', 'r') as f:
-                softbio_cfg = yaml.safe_load(f)['softbio']
+        # Initialize soft biometrics components (optional)
+        if SOFTBIO_AVAILABLE:
+            logger.info("Initializing soft biometrics components...")
+            try:
+                # Load softbio configuration
+                with open('softbio/config/softbio.yaml', 'r') as f:
+                    softbio_cfg = yaml.safe_load(f)['softbio']
 
-            # Initialize feature extractor and model
-            grid_cfg = softbio_cfg['grid']
-            softbio_extractor = GaitFeatureExtractor(
-                grid_w=int(grid_cfg['width']),
-                grid_h=int(grid_cfg['height']),
-                cell_m=float(grid_cfg['cell_meters']),
-                cfg=softbio_cfg
-            )
-            softbio_model = SoftBioBaseline(cfg=softbio_cfg)
-            logger.info("Soft biometrics components initialized successfully")
-        except Exception as e:
-            logger.warning(f"Could not initialize soft biometrics: {str(e)}")
-            # Don't fail - allow server to run without softbio
+                # Initialize feature extractor and model
+                grid_cfg = softbio_cfg['grid']
+                softbio_extractor = GaitFeatureExtractor(
+                    grid_w=int(grid_cfg['width']),
+                    grid_h=int(grid_cfg['height']),
+                    cell_m=float(grid_cfg['cell_meters']),
+                    cfg=softbio_cfg
+                )
+                softbio_model = SoftBioBaseline(cfg=softbio_cfg)
+                logger.info("Soft biometrics components initialized successfully")
+            except Exception as e:
+                logger.warning(f"Could not initialize soft biometrics: {str(e)}")
+                # Don't fail - allow server to run without softbio
+        else:
+            logger.info("Soft biometrics not available (missing numpy/sklearn dependencies)")
 
         logger.info("All buffers initialized - Fall detector bypassed")
         logger.info("This server is configured for PT metrics testing only")
