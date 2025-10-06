@@ -1,0 +1,45 @@
+# Soft Biometrics default configuration (tunable; demo-first)
+softbio:
+  input_topic: controller/networkx/frame/rft
+  output_topic: softbio/prediction
+  debug_topic: softbio/debug/features
+  publish_interval_ms: 500   # minimum interval between predictions per track
+
+  # MQTT broker configuration (matches server.py settings)
+  mqtt:
+    host: 169.254.100.100
+    port: 1883
+    keepalive: 60
+
+  grid:
+    width: 12
+    height: 15
+    cell_meters: 0.1016      # 4 inches
+
+  tracking:
+    max_assign_dist_cells: 5
+    min_stance_frames: 3     # >= 300 ms stance @ 10 Hz
+    min_swing_frames: 2
+    max_gap_frames: 5
+    track_timeout_seconds: 5.0  # expire tracks after 5 seconds of no activity
+
+  baseline:
+    # Height from stride/step relationships (literature-informed defaults)
+    k_stride_height: 0.83    # stride_len_m ≈ 0.83 * height_m  -> height = stride / k
+    k_step_height: 0.415     # step_len_m   ≈ 0.415 * height_m -> height = step / k
+
+    # Age binning by double support and speed (research-backed values)
+    age_bins:
+      - {name: "child",        ds_pct_max: 24, speed_mps_min: 1.10, years: [6, 17]}
+      - {name: "young_adult",  ds_pct_max: 24, speed_mps_min: 1.20, years: [18, 39]}
+      - {name: "middle_adult", ds_pct_max: 28, speed_mps_min: 1.10, years: [40, 59]}
+      - {name: "older",        ds_pct_max: 32, speed_mps_min: 0.90, years: [60, 74]}
+      - {name: "elderly",      ds_pct_max: 38, speed_mps_min: 0.70, years: [75, 99]}
+
+    # Gender logistic weights (sensor grid calibrated)
+    gender_logistic:
+      bias: 0.0
+      w_norm_step_len:  1.20  # males longer normalized steps
+      w_cadence:       -0.40  # reduced weight - sensor grid encourages higher cadence
+      w_step_width:     0.60  # increased weight for step width discrimination
+      w_ds_pct:        -0.70  # increased weight for double support discrimination

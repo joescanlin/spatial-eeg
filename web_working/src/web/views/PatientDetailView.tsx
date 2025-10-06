@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CollapsiblePanel } from '../../components/CollapsiblePanel';
-import { User, Calendar, ArrowLeft, ClipboardList } from 'lucide-react';
+import { User, Calendar, ArrowLeft, ClipboardList, Brain, Activity, Download, Folder, File, FileJson, FileSpreadsheet } from 'lucide-react';
 import PTSessionSummary from '../../components/PTSessionSummary';
 import NoteGenerator from '../../components/NoteGenerator';
+import { generateMockResearchSessions, ResearchSession } from '../../utils/mockResearchData';
 
-// Define the Patient interface
+// Define the Patient interface (keeping for compatibility)
 interface Patient {
   id: number;
   first_name: string;
@@ -15,7 +16,7 @@ interface Patient {
   last_visit: string;
 }
 
-// Define the Session interface
+// Define the Session interface (mapping research to PT format)
 interface Session {
   id: string;
   patientId: number;
@@ -25,6 +26,11 @@ interface Session {
   metrics: any[];
   notes: string;
   selectedMetrics: string[];
+  // Research-specific fields
+  trialNumber?: number;
+  flooringPattern?: string;
+  eeg?: ResearchSession['eeg'];
+  environmentalNotes?: string;
 }
 
 interface PatientDetailViewProps {
@@ -635,49 +641,53 @@ export default function PatientDetailView({ patient, onBack }: PatientDetailView
     }
   }, [patient.id]);
   
-  // Fetch patient sessions
+  // Fetch research sessions
   const { data: sessions, isLoading, error } = useQuery({
     queryKey: ['patient-sessions', patient.id],
     queryFn: async () => {
       try {
-        console.log('Fetching sessions for patient:', patient.id);
-        
-        // Check if we have local storage sessions
-        let storedSessions = [];
-        try {
-          storedSessions = JSON.parse(localStorage.getItem('pt-sessions') || '[]');
-          console.log('Retrieved sessions from localStorage:', storedSessions);
-        } catch (storageError) {
-          console.error('Error accessing localStorage:', storageError);
-        }
-        
-        // Filter sessions for this patient
-        const patientSessions = storedSessions.filter((session: Session) => 
-          session.patientId === patient.id
-        );
-        
-        // If we have stored sessions for this patient, return them
-        if (patientSessions.length > 0) {
-          console.log(`Found ${patientSessions.length} sessions for patient ${patient.id} in localStorage`);
-          return patientSessions;
-        }
-        
-        // If no stored sessions, use mock data - this is the key change
-        console.log('Using mock data for patient', patient.id);
-        const filteredMockSessions = mockSessions.filter(session => session.patientId === patient.id);
-        console.log(`Found ${filteredMockSessions.length} mock sessions for patient ${patient.id}`);
-        
-        // Store these sessions in local storage for future use
-        const allStoredSessions = [...storedSessions, ...filteredMockSessions];
-        localStorage.setItem('pt-sessions', JSON.stringify(allStoredSessions));
-        
-        return filteredMockSessions;
+        console.log('Fetching research sessions for subject:', patient.id);
+
+        // Generate mock research sessions with EEG + spatial data
+        const researchSessions = generateMockResearchSessions(patient.id);
+        console.log(`Generated ${researchSessions.length} research sessions for subject ${patient.id}`);
+
+        // Convert research sessions to Session format
+        const convertedSessions: Session[] = researchSessions.map(rs => ({
+          id: rs.id,
+          patientId: rs.subjectId,
+          startTime: rs.startTime,
+          endTime: rs.endTime,
+          duration: rs.duration,
+          metrics: rs.metrics,
+          notes: rs.notes,
+          selectedMetrics: rs.selectedMetrics,
+          trialNumber: rs.trialNumber,
+          flooringPattern: rs.flooringPattern,
+          eeg: rs.eeg,
+          environmentalNotes: rs.environmentalNotes
+        }));
+
+        return convertedSessions;
       } catch (err) {
-        console.error('Error fetching sessions:', err);
-        throw new Error('Failed to fetch patient sessions');
+        console.error('Error fetching research sessions:', err);
+        throw new Error('Failed to fetch research sessions');
       }
     },
     // Only fetch if we have a patient
+    enabled: Boolean(patient?.id),
+  });
+
+  // Fetch session files
+  const { data: sessionFiles } = useQuery({
+    queryKey: ['patient-files', patient.id],
+    queryFn: async () => {
+      const response = await fetch(`http://localhost:8000/api/patients/${patient.id}/files`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch session files');
+      }
+      return response.json();
+    },
     enabled: Boolean(patient?.id),
   });
   
@@ -685,7 +695,75 @@ export default function PatientDetailView({ patient, onBack }: PatientDetailView
   const handleBackToSessions = () => {
     setSelectedSession(null);
   };
-  
+
+  // Handle export of all session data
+  const handleExportData = async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/patients/${patient.id}/export`);
+
+      if (!response.ok) {
+        throw new Error('Export failed');
+      }
+
+      // Get the filename from Content-Disposition header
+      const contentDisposition = response.headers.get('Content-Disposition');
+      const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+      const filename = filenameMatch ? filenameMatch[1] : `Subject_${patient.id}_Data.zip`;
+
+      // Download the file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      alert('Failed to export data. Please try again.');
+    }
+  };
+
+  // Handle individual file download
+  const handleDownloadFile = async (filePath: string, filename: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/patients/${patient.id}/files/download?file_path=${encodeURIComponent(filePath)}`);
+
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      alert('Failed to download file. Please try again.');
+    }
+  };
+
+  // Get file icon based on extension
+  const getFileIcon = (filename: string) => {
+    if (filename.endsWith('.json')) return <FileJson size={16} className="text-blue-400" />;
+    if (filename.endsWith('.csv')) return <FileSpreadsheet size={16} className="text-green-400" />;
+    return <File size={16} className="text-gray-400" />;
+  };
+
+  // Format file size
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   // Log the selected session data when it changes (for debugging)
   useEffect(() => {
     if (selectedSession) {
@@ -697,15 +775,25 @@ export default function PatientDetailView({ patient, onBack }: PatientDetailView
   
   return (
     <div className="space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center">
+      {/* Header with back button and export button */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center">
+          <button
+            onClick={onBack}
+            className="mr-4 p-2 rounded-full bg-gray-700 hover:bg-gray-600 text-white"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <h2 className="text-2xl font-bold">Subject Details</h2>
+        </div>
         <button
-          onClick={onBack}
-          className="mr-4 p-2 rounded-full bg-gray-700 hover:bg-gray-600 text-white"
+          onClick={handleExportData}
+          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
+          title="Export all session data (Floor + EEG)"
         >
-          <ArrowLeft size={20} />
+          <Download size={18} />
+          Export Session Data
         </button>
-        <h2 className="text-2xl font-bold">Patient Details</h2>
       </div>
       
       {/* Patient Details Card */}
@@ -735,7 +823,55 @@ export default function PatientDetailView({ patient, onBack }: PatientDetailView
           </div>
         </div>
       </CollapsiblePanel>
-      
+
+      {/* Session Data Files Panel */}
+      <CollapsiblePanel
+        title="Session Data Files"
+        icon={<Folder className="w-6 h-6 text-purple-400" />}
+        defaultExpanded={false}
+      >
+        {sessionFiles && sessionFiles.sessions && sessionFiles.sessions.length > 0 ? (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-300 mb-4">
+              Browse and download floor sensor and EEG data files for each session. Files are organized by session date.
+            </p>
+            {sessionFiles.sessions.map((session: any) => (
+              <div key={session.name} className="bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Folder className="text-yellow-400" size={20} />
+                  <h4 className="font-medium text-lg">{session.name}</h4>
+                </div>
+                <div className="ml-6 space-y-2">
+                  {session.files.map((file: any) => (
+                    <div
+                      key={file.name}
+                      className="flex items-center justify-between bg-gray-700 p-3 rounded hover:bg-gray-600 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        {getFileIcon(file.name)}
+                        <span className="font-mono text-sm">{file.name}</span>
+                        <span className="text-xs text-gray-400">{formatFileSize(file.size_bytes)}</span>
+                      </div>
+                      <button
+                        onClick={() => handleDownloadFile(`${session.path}/${file.name}`, file.name)}
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm flex items-center gap-1"
+                      >
+                        <Download size={14} />
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-gray-400 text-center py-8">
+            No session data files available yet
+          </div>
+        )}
+      </CollapsiblePanel>
+
       {/* Show session details or session list */}
       {selectedSession ? (
         <div className="space-y-4">

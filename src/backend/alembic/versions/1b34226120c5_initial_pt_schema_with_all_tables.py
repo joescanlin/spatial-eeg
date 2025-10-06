@@ -1,8 +1,8 @@
-"""Initial migration
+"""Initial PT schema with all tables
 
-Revision ID: 6c70f0855cc4
+Revision ID: 1b34226120c5
 Revises: 
-Create Date: 2025-05-13 14:57:49.463807
+Create Date: 2025-06-23 10:11:27.630158
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '6c70f0855cc4'
+revision: str = '1b34226120c5'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -40,6 +40,14 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email')
     )
+    op.create_table('pt_clinics',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(), nullable=True),
+    sa.Column('area_ft2', sa.Float(), nullable=True),
+    sa.Column('sub_rate', sa.Float(), nullable=True),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_pt_clinics_name'), 'pt_clinics', ['name'], unique=True)
     op.create_table('patients',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('clinic_id', sa.String(), nullable=True),
@@ -52,6 +60,32 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['clinic_id'], ['clinics.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('pt_invoices',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('clinic_id', sa.Integer(), nullable=True),
+    sa.Column('period_start', sa.DateTime(), nullable=True),
+    sa.Column('period_end', sa.DateTime(), nullable=True),
+    sa.Column('billable_area', sa.Float(), nullable=True),
+    sa.Column('amount_due', sa.Float(), nullable=True),
+    sa.Column('paid', sa.Boolean(), nullable=True),
+    sa.ForeignKeyConstraint(['clinic_id'], ['pt_clinics.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('pt_patients',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('clinic_id', sa.Integer(), nullable=True),
+    sa.Column('first_name', sa.String(), nullable=False),
+    sa.Column('last_name', sa.String(), nullable=False),
+    sa.Column('gender', sa.String(length=10), nullable=True),
+    sa.Column('date_of_birth', sa.DateTime(), nullable=True),
+    sa.Column('height_cm', sa.Float(), nullable=True),
+    sa.Column('dx_icd10', sa.String(), nullable=True),
+    sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['clinic_id'], ['pt_clinics.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('sensors',
@@ -91,6 +125,20 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['patient_id'], ['patients.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('pt_sessions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('patient_id', sa.Integer(), nullable=True),
+    sa.Column('activity', sa.String(), nullable=True),
+    sa.Column('start_ts', sa.DateTime(), nullable=True),
+    sa.Column('end_ts', sa.DateTime(), nullable=True),
+    sa.Column('session_notes', sa.Text(), nullable=True),
+    sa.Column('selected_metrics', sa.JSON(), nullable=True),
+    sa.Column('ai_summary', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['patient_id'], ['pt_patients.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('sessions',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('patient_id', sa.String(), nullable=True),
@@ -113,18 +161,63 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('pt_metric_samples',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('session_id', sa.Integer(), nullable=True),
+    sa.Column('ts', sa.DateTime(), nullable=True),
+    sa.Column('cadence_spm', sa.Float(), nullable=True),
+    sa.Column('stride_len_in', sa.Float(), nullable=True),
+    sa.Column('cadence_cv_pct', sa.Float(), nullable=True),
+    sa.Column('symmetry_idx_pct', sa.Float(), nullable=True),
+    sa.Column('dbl_support_pct', sa.Float(), nullable=True),
+    sa.Column('left_stance_time_ms', sa.Float(), nullable=True),
+    sa.Column('right_stance_time_ms', sa.Float(), nullable=True),
+    sa.Column('stance_time_asymmetry_pct', sa.Float(), nullable=True),
+    sa.Column('left_step_length_cm', sa.Float(), nullable=True),
+    sa.Column('right_step_length_cm', sa.Float(), nullable=True),
+    sa.Column('step_length_symmetry_pct', sa.Float(), nullable=True),
+    sa.Column('gait_variability_cv_pct', sa.Float(), nullable=True),
+    sa.Column('sway_path_cm', sa.Float(), nullable=True),
+    sa.Column('sway_vel_cm_s', sa.Float(), nullable=True),
+    sa.Column('sway_area_cm2', sa.Float(), nullable=True),
+    sa.Column('cop_area_cm2', sa.Float(), nullable=True),
+    sa.Column('stability_score', sa.Float(), nullable=True),
+    sa.Column('weight_shift_quality', sa.Float(), nullable=True),
+    sa.Column('left_pct', sa.Float(), nullable=True),
+    sa.Column('right_pct', sa.Float(), nullable=True),
+    sa.Column('ant_pct', sa.Float(), nullable=True),
+    sa.Column('post_pct', sa.Float(), nullable=True),
+    sa.Column('active_area_pct', sa.Float(), nullable=True),
+    sa.Column('turn_count', sa.Integer(), nullable=True),
+    sa.Column('avg_turn_angle_deg', sa.Float(), nullable=True),
+    sa.Column('sts_reps', sa.Integer(), nullable=True),
+    sa.Column('sts_avg_time_s', sa.Float(), nullable=True),
+    sa.Column('exercise_completion_pct', sa.Float(), nullable=True),
+    sa.Column('range_of_motion_deg', sa.Float(), nullable=True),
+    sa.Column('metric_status', sa.JSON(), nullable=True),
+    sa.ForeignKeyConstraint(['session_id'], ['pt_sessions.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_pt_metric_samples_ts'), 'pt_metric_samples', ['ts'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_pt_metric_samples_ts'), table_name='pt_metric_samples')
+    op.drop_table('pt_metric_samples')
     op.drop_table('metric_samples')
     op.drop_table('sessions')
+    op.drop_table('pt_sessions')
     op.drop_table('invoices')
     op.drop_table('events')
     op.drop_table('sensors')
+    op.drop_table('pt_patients')
+    op.drop_table('pt_invoices')
     op.drop_table('patients')
+    op.drop_index(op.f('ix_pt_clinics_name'), table_name='pt_clinics')
+    op.drop_table('pt_clinics')
     op.drop_table('customers')
     op.drop_table('clinics')
     # ### end Alembic commands ###

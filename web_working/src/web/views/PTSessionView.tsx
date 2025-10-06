@@ -16,6 +16,7 @@ import { usePTStream } from '../../hooks/usePTStream';
 import { ChevronRight, ChevronLeft, LayoutGrid, Maximize2, Clock } from 'lucide-react';
 import { useBalanceTraining } from '../../hooks/useBalanceTraining';
 import { BalanceTrainingGuide } from '../../components/BalanceTrainingGuide';
+import EEGPanel from '../../components/EEGPanel';
 
 // Exercise Step Guide component
 interface ExerciseStepGuideProps {
@@ -136,14 +137,17 @@ export default function PTSessionView() {
   
   // Handle starting a custom exercise
   const handleStartExercise = (type: string, customExercise?: CustomExercise) => {
-    startExercise(type);
-    
     if (customExercise) {
+      startExercise(type);
       setActiveCustomExercise(customExercise);
       setCurrentStep(0);
       setTimeRemaining(customExercise.steps[0].duration);
     } else if (type === 'balance') {
-      balanceTraining.start();
+      // For balance training, just set the phase to introduction
+      // The actual session will start when user clicks "Begin Assessment"
+      balanceTraining.start(); // This now just sets phase to 'introduction'
+    } else {
+      startExercise(type);
     }
   };
 
@@ -251,7 +255,7 @@ export default function PTSessionView() {
   
   // State for collapsing sidebar and metrics panel
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
-  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   
   // State for expanded metric (for mobile view)
   const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
@@ -355,7 +359,12 @@ export default function PTSessionView() {
                   isSessionActive={isSessionActive}
                 />
               </div>
-              
+
+              {/* EEG Panel */}
+              <div className="mt-4">
+                <EEGPanel sample={gridData.eeg} />
+              </div>
+
               {/* Button to expand to fullscreen */}
               <button 
                 className="absolute top-3 right-3 bg-gray-700 hover:bg-gray-600 rounded p-1"
@@ -398,17 +407,24 @@ export default function PTSessionView() {
         </div>
         
         {/* Main content - grid display */}
-        <div className={`flex-grow transition-all duration-300 ${rightPanelCollapsed ? 'mr-0' : 'mr-0 lg:mr-80'}`}>
+        <div className="flex-grow transition-all duration-300">
           <div className="h-[700px] relative">
             <GridDisplay data={gridData} />
             <div className="absolute top-4 right-4">
               {/* Show Balance Training Guide or Custom Exercise Guide based on what's active */}
-              {balanceTraining.active && (
+              {balanceTraining.phase !== 'idle' && (
                 <BalanceTrainingGuide
-                  active={balanceTraining.active}
-                  stepText={balanceTraining.stepText}
+                  phase={balanceTraining.phase}
+                  currentStep={balanceTraining.currentStep}
+                  stepIndex={balanceTraining.stepIndex}
+                  totalSteps={balanceTraining.totalSteps}
                   progress={balanceTraining.progress}
+                  elapsed={balanceTraining.elapsed}
+                  onStart={balanceTraining.start}
                   onStop={balanceTraining.stop}
+                  onCancel={balanceTraining.cancel}
+                  onProceed={balanceTraining.proceedToNext}
+                  sessionId={balanceTraining.sessionId}
                 />
               )}
               
@@ -434,6 +450,17 @@ export default function PTSessionView() {
           </div>
         </div>
         
+        {/* Toggle button for metrics panel - visible when panel is hidden */}
+        {rightPanelCollapsed && (
+          <button 
+            className="hidden lg:block fixed right-4 top-1/2 transform -translate-y-1/2 bg-gray-700 hover:bg-gray-600 rounded-full p-3 shadow-lg z-30 transition-colors"
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            title="Show metrics panel"
+          >
+            <ChevronLeft className="w-5 h-5 text-gray-300" />
+          </button>
+        )}
+
         {/* Right Panel - Metrics display (hidden on mobile) */}
         <div className={`hidden lg:block fixed right-0 top-0 bottom-0 ${rightPanelCollapsed ? 'translate-x-full' : 'translate-x-0'} w-80 bg-gray-900 p-6 pt-24 overflow-y-auto transition-transform duration-300 shadow-lg border-l border-gray-800 z-20`}>
           {/* Toggle button */}
@@ -441,10 +468,7 @@ export default function PTSessionView() {
             className="absolute left-3 top-1/2 transform -translate-y-1/2 bg-gray-700 rounded-full p-1"
             onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
           >
-            {rightPanelCollapsed ? 
-              <ChevronLeft className="w-4 h-4 text-gray-300" /> : 
-              <ChevronRight className="w-4 h-4 text-gray-300" />
-            }
+            <ChevronRight className="w-4 h-4 text-gray-300" />
           </button>
           
           {/* Metrics components */}

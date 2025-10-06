@@ -69,7 +69,7 @@ export default function LiveGait() {
           cadence, 
           symmetry,
           stepLengthSymmetry,
-          copArea: Math.random() * 10, // Mock value between 0-10 cm²
+          copArea: ptMetrics.copArea || 0, // Real CoP area from PT analytics
           leftLoadPct: Math.random() * 100,
           rightLoadPct: Math.random() * 100,
           swayVelocity: Math.random() * 4 // Mock value between 0-4 cm/s
@@ -94,7 +94,7 @@ export default function LiveGait() {
         cadence: 110 + Math.random() * 10,
         symmetry: 80 + Math.random() * 10,
         stepLengthSymmetry: 90 + Math.random() * 10, // 90-100% range for step length symmetry
-        copArea: Math.random() * 10, // Mock value between 0-10 cm²
+        copArea: ptMetrics.copArea || Math.random() * 10, // Real CoP area or fallback to mock
         leftLoadPct: Math.random() * 100,
         rightLoadPct: Math.random() * 100,
         swayVelocity: Math.random() * 4 // Mock value between 0-4 cm/s

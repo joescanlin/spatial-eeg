@@ -13,9 +13,10 @@ import PatientTable from './components/PatientTable';
 import PTSessionView from './web/views/PTSessionView';
 import LiveGait from './web/views/LiveGait';
 import PatientDetailView from './web/views/PatientDetailView';
-import PatientReport from './web/views/PatientReport';
-import PatientComparisonView from './web/views/PatientComparisonView';
-import { Cpu, Award, Clock, FileText } from 'lucide-react';
+import ResearchSubjectReport from './web/views/ResearchSubjectReport';
+import SubjectComparisonView from './web/views/SubjectComparisonView';
+import EEGView from './web/views/EEGView';
+import UnifiedGridTestView from './web/views/UnifiedGridTestView';
 
 // Define the Patient interface
 interface Patient {
@@ -28,8 +29,8 @@ interface Patient {
 }
 
 function App() {
-  // Set PT Dashboard as the default view
-  const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait' | 'patient-report' | 'patient-comparison'>('pt-dashboard');
+  // Set Research Subjects (patients) as the default view
+  const [view, setView] = useState<'dashboard' | 'training-data' | 'pt-dashboard' | 'patients' | 'patient-detail' | 'pt-session' | 'live-gait' | 'patient-report' | 'patient-comparison' | 'eeg' | 'unified-grid'>('patients');
   
   // Pass current view to useDataStream
   const { gridData, stats } = useDataStream(view);
@@ -112,6 +113,8 @@ function App() {
         return 'Session';
       case 'live-gait':
         return 'Gait';
+      case 'eeg':
+        return 'EEG';
       default:
         return 'Sensor';
     }
@@ -120,54 +123,57 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex justify-between items-center">
-          <StatusBanner streamName={getStatusName()} status={stats} />
-          <div className="flex flex-wrap gap-2">
-            <button 
-              className={`px-3 py-1 rounded text-sm ${view === 'dashboard' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => changeView('dashboard')}
-            >
-              Dashboard
-            </button>
+        {/* Status Banner */}
+        <StatusBanner streamName={getStatusName()} status={stats} />
+
+        {/* Navigation Buttons - Larger and more accessible */}
+        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+          <div className="flex flex-wrap gap-3">
             <button
-              className={`px-3 py-1 rounded text-sm ${view === 'pt-dashboard' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => changeView('pt-dashboard')}
-            >
-              PT Dashboard
-            </button>
-            <button
-              className={`px-3 py-1 rounded text-sm ${view === 'pt-session' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => changeView('pt-session')}
-            >
-              PT Session
-            </button>
-            <button
-              className={`px-3 py-1 rounded text-sm ${view === 'live-gait' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              className={`px-6 py-3 rounded-lg text-base font-medium transition-colors ${
+                view === 'live-gait' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
               onClick={() => changeView('live-gait')}
             >
               Live Gait
             </button>
             <button
-              className={`px-3 py-1 rounded text-sm ${(view === 'patients' || view === 'patient-detail' || view === 'patient-report') ? 'bg-blue-600' : 'bg-gray-700'}`}
+              className={`px-6 py-3 rounded-lg text-base font-medium transition-colors ${
+                (view === 'patients' || view === 'patient-detail' || view === 'patient-report')
+                  ? 'bg-blue-600 hover:bg-blue-700'
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
               onClick={() => {
                 changeView('patients');
                 setSelectedPatient(null);
                 setReportPatientId(null);
               }}
             >
-              Patients
+              Subjects
             </button>
             <button
-              className={`px-3 py-1 rounded text-sm ${view === 'patient-comparison' ? 'bg-blue-600' : 'bg-gray-700'}`}
+              className={`px-6 py-3 rounded-lg text-base font-medium transition-colors ${
+                view === 'patient-comparison' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
               onClick={() => changeView('patient-comparison')}
             >
-              Patient Comparison
+              Subject Comparison
             </button>
             <button
-              className={`px-3 py-1 rounded text-sm ${view === 'training-data' ? 'bg-blue-600' : 'bg-gray-700'}`}
-              onClick={() => changeView('training-data')}
+              className={`px-6 py-3 rounded-lg text-base font-medium transition-colors ${
+                view === 'eeg' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              onClick={() => changeView('eeg')}
             >
-              Training Data
+              EEG
+            </button>
+            <button
+              className={`px-6 py-3 rounded-lg text-base font-medium transition-colors ${
+                view === 'unified-grid' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              onClick={() => changeView('unified-grid')}
+            >
+              Unified Grid
             </button>
           </div>
         </div>
@@ -205,46 +211,9 @@ function App() {
         
         {view === 'patients' && (
           <div className="space-y-6">
-            {/* Feature highlight card for SOAP Note Generation */}
-            <div className="bg-indigo-900/30 border border-indigo-800 rounded-lg p-6">
-              <div className="flex flex-col md:flex-row md:items-start">
-                <div className="bg-indigo-600 p-3 rounded-lg mb-4 md:mr-4 md:mb-0">
-                  <Cpu className="w-8 h-8 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-white mb-2">
-                    New: AI-Powered SOAP Note Generation
-                  </h2>
-                  <p className="text-indigo-200 mb-4">
-                    Our new AI-powered SOAP note generator automatically creates structured clinical documentation
-                    based on your session data, saving you valuable time and improving standardization.
-                  </p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div className="bg-indigo-800/50 p-3 rounded-lg flex items-center">
-                      <Clock className="w-5 h-5 text-indigo-300 mr-2" />
-                      <span className="text-sm">Save 15+ minutes per patient</span>
-                    </div>
-                    <div className="bg-indigo-800/50 p-3 rounded-lg flex items-center">
-                      <FileText className="w-5 h-5 text-indigo-300 mr-2" />
-                      <span className="text-sm">Standardized documentation</span>
-                    </div>
-                    <div className="bg-indigo-800/50 p-3 rounded-lg flex items-center">
-                      <Award className="w-5 h-5 text-indigo-300 mr-2" />
-                      <span className="text-sm">Medicare/insurance compliant</span>
-                    </div>
-                  </div>
-                  
-                  <div className="text-sm text-indigo-200">
-                    To try it, select a patient from the list below and click on any session to see the AI-generated SOAP note.
-                  </div>
-                </div>
-              </div>
-            </div>
-          
             <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-              <h2 className="text-2xl font-bold mb-6">Patient Management</h2>
-              <PatientTable 
+              <h2 className="text-2xl font-bold mb-6">Research Subject Management</h2>
+              <PatientTable
                 onSelect={handleSelectPatient}
                 onViewReport={handleViewPatientReport}
               />
@@ -263,7 +232,7 @@ function App() {
         
         {view === 'patient-report' && reportPatientId && (
           <div className="w-full">
-            <PatientReport />
+            <ResearchSubjectReport />
           </div>
         )}
         
@@ -273,21 +242,35 @@ function App() {
           </div>
         )}
 
+        {/* Hidden PT Session view - component files kept for dependencies
         {view === 'pt-session' && (
           <div className="w-full">
             <PTSessionView />
           </div>
         )}
+        */}
 
         {view === 'live-gait' && (
           <div className="w-full">
             <LiveGait />
           </div>
         )}
-        
+
         {view === 'patient-comparison' && (
           <div className="w-full">
-            <PatientComparisonView />
+            <SubjectComparisonView />
+          </div>
+        )}
+
+        {view === 'eeg' && (
+          <div className="w-full">
+            <EEGView />
+          </div>
+        )}
+
+        {view === 'unified-grid' && (
+          <div className="w-full">
+            <UnifiedGridTestView />
           </div>
         )}
       </div>

@@ -1,55 +1,67 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { X, Search } from 'lucide-react';
+import { patientApi, Patient, PatientApiError } from '../services/patientApi';
 
-// Patient interface (matching the one from PatientTable)
-interface Patient {
-  id: number;
-  first_name: string;
-  last_name: string;
-  diagnosis: string;
-  sessions_count: number;
-  last_visit: string;
-}
-
-// Mock data for patients (same as in PatientTable)
+// Mock data for fallback when API is not available
 const mockPatients: Patient[] = [
   { 
     id: 1, 
+    clinic_id: 1,
     first_name: 'John', 
     last_name: 'Doe', 
-    diagnosis: 'Post-operative rehabilitation', 
+    gender: 'Male',
+    age: 34,
+    diagnosis: 'Post-operative rehabilitation',
+    dx_icd10: 'Z51.89',
     sessions_count: 8, 
     last_visit: '2025-05-10' 
   },
   { 
     id: 2, 
+    clinic_id: 1,
     first_name: 'Jane', 
     last_name: 'Smith', 
-    diagnosis: 'ACL reconstruction', 
+    gender: 'Female',
+    age: 28,
+    diagnosis: 'ACL reconstruction',
+    dx_icd10: 'S83.511A',
     sessions_count: 15, 
     last_visit: '2025-05-14' 
   },
   { 
     id: 3, 
+    clinic_id: 1,
     first_name: 'Robert', 
     last_name: 'Johnson', 
-    diagnosis: 'Lower back pain', 
+    gender: 'Male',
+    age: 45,
+    diagnosis: 'Lower back pain',
+    dx_icd10: 'M54.5',
     sessions_count: 5, 
     last_visit: '2025-05-07' 
   },
   { 
     id: 4, 
+    clinic_id: 1,
     first_name: 'Maria', 
     last_name: 'Garcia', 
-    diagnosis: 'Shoulder impingement', 
+    gender: 'Female',
+    age: 32,
+    diagnosis: 'Shoulder impingement',
+    dx_icd10: 'M75.3',
     sessions_count: 10, 
     last_visit: '2025-05-13' 
   },
   { 
     id: 5, 
+    clinic_id: 1,
     first_name: 'William', 
     last_name: 'Brown', 
-    diagnosis: 'Hip replacement', 
+    gender: 'Male',
+    age: 67,
+    diagnosis: 'Hip replacement',
+    dx_icd10: 'Z96.641',
     sessions_count: 20, 
     last_visit: '2025-05-12' 
   }
@@ -67,14 +79,41 @@ export function PatientSelectionModal({
   onSelectPatient
 }: PatientSelectionModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [useApi, setUseApi] = useState(true);
+  
+  // Fetch patients data with API fallback to mock data
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['patients-modal'],
+    queryFn: async () => {
+      if (!useApi) {
+        return mockPatients;
+      }
+      
+      try {
+        const patients = await patientApi.getPatients();
+        // Map dx_icd10 to diagnosis for backward compatibility
+        return patients.map(patient => ({
+          ...patient,
+          diagnosis: patient.dx_icd10 || patient.diagnosis || 'No diagnosis'
+        }));
+      } catch (error) {
+        console.warn('API not available, falling back to mock data:', error);
+        setUseApi(false);
+        return mockPatients;
+      }
+    },
+    retry: 1,
+    staleTime: 30000, // 30 seconds
+    refetchOnWindowFocus: false,
+  });
   
   // Filter patients based on search term
-  const filteredPatients = mockPatients.filter(patient => {
+  const filteredPatients = data ? data.filter((patient: Patient) => {
     const fullName = `${patient.first_name} ${patient.last_name}`.toLowerCase();
     const diagnosis = patient.diagnosis?.toLowerCase() || '';
     return fullName.includes(searchTerm.toLowerCase()) || 
            diagnosis.includes(searchTerm.toLowerCase());
-  });
+  }) : [];
   
   if (!isOpen) return null;
   
@@ -113,8 +152,26 @@ export function PatientSelectionModal({
         </div>
         
         <div className="overflow-y-auto flex-grow">
-          <div className="divide-y divide-gray-700">
-            {filteredPatients.length > 0 ? (
+          {isLoading ? (
+            <div className="flex justify-center items-center h-40">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+          ) : error && useApi ? (
+            <div className="text-red-500 p-4">
+              <div className="font-bold">Error loading patients data</div>
+              <div className="text-sm mt-1">
+                {error instanceof PatientApiError ? error.message : 'Please try again later.'}
+              </div>
+              <button 
+                onClick={() => refetch()} 
+                className="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-700">
+              {filteredPatients.length > 0 ? (
               filteredPatients.map(patient => (
                 <div 
                   key={patient.id}
@@ -140,11 +197,26 @@ export function PatientSelectionModal({
                   </div>
                 </div>
               ))
+              ) : (
+                <div className="p-4 text-center text-gray-400">
+                  {searchTerm ? `No patients found matching "${searchTerm}"` : 'No patients available'}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {/* Connection status indicator */}
+        <div className="p-3 border-t border-gray-700 text-xs text-gray-400 flex justify-between">
+          <div>
+            {useApi ? (
+              <span className="text-green-400">✓ Connected to database</span>
             ) : (
-              <div className="p-4 text-center text-gray-400">
-                No patients found matching "{searchTerm}"
-              </div>
+              <span className="text-yellow-400">⚠ Using demo data (database unavailable)</span>
             )}
+          </div>
+          <div>
+            {filteredPatients.length} patient{filteredPatients.length !== 1 ? 's' : ''} shown
           </div>
         </div>
       </div>

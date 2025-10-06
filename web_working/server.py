@@ -19,6 +19,20 @@ import random
 import logging.handlers
 import uuid
 
+# Import soft biometrics components
+from softbio.feature_extractor import GaitFeatureExtractor
+from softbio.baseline_model import SoftBioBaseline
+
+# Import EEG components
+from threading import Lock
+import sys
+import os
+# Add parent directory to path to import from src
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.utils.lsl_client import LSLReader
+from src.utils.session_writer import SessionWriter
+from eeg_flask_routes import init_eeg_routes, start_cortex_in_thread
+
 # Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
 
@@ -86,14 +100,63 @@ mqtt_connected = False
 # Store alerts in memory
 alert_history = []
 
+# Multi-basestation configuration (loaded from config.yaml)
+BASESTATION_CONFIG = config.get('basestations', {})
+UNIFIED_GRID_WIDTH = BASESTATION_CONFIG.get('unified_grid', {}).get('width', 80)
+UNIFIED_GRID_HEIGHT = BASESTATION_CONFIG.get('unified_grid', {}).get('height', 54)
+BASESTATION_DEVICES = BASESTATION_CONFIG.get('devices', {})
+
+# Multi-basestation frame buffer - initialized from config
+basestation_frames = {}
+for bs_id, bs_config in BASESTATION_DEVICES.items():
+    basestation_frames[bs_id] = {
+        'data': None,
+        'timestamp': 0,
+        'connected': False,
+        'width': bs_config.get('width'),
+        'height': bs_config.get('height'),
+        'offsetX': bs_config.get('offsetX'),
+        'offsetY': bs_config.get('offsetY')
+    }
+
+# --- Soft-bio SSE/MQTT globals ---
+SOFTBIO_TOPIC = "softbio/prediction"
+_softbio_q = queue.Queue(maxsize=1000)
+
+# Initialize soft biometrics components
+softbio_extractor = None
+softbio_model = None
+softbio_last_pub = {}  # Track last publish time per track_id
+SOFTBIO_PUBLISH_INTERVAL = 0.5  # 500ms between predictions per track
+
+# Load EEG and session export config
+EEG_CFG = config.get("eeg", {"enabled": False})
+EXP_CFG = config.get("session_export", {"enabled": False, "dir": "./session_exports", "format":"parquet"})
+
+# EEG initialization
+eeg_reader = None
+eeg_lock = Lock()
+if EEG_CFG.get("enabled"):
+    try:
+        eeg_reader = LSLReader(stream_name=EEG_CFG.get("stream_name","EEG"))
+        eeg_reader.start()
+        logger.info("[EEG] LSL inlet started")
+    except Exception as e:
+        logger.warning(f"[EEG] LSL not available: {e}")
+        eeg_reader = None
+
+# Session writer (created per active session)
+session_writer = None
+active_session_id = None
+
 # Fall detection settings - use env vars if available, otherwise use config
 SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', config['detector']['sequence_length']))
 FALL_THRESHOLD = float(os.getenv('FALL_THRESHOLD', config['detector']['fall_threshold']))
 CONSECUTIVE_FRAMES = int(os.getenv('CONSECUTIVE_FRAMES', config['detector']['consecutive_frames']))
 COOLDOWN_PERIOD = int(os.getenv('COOLDOWN_PERIOD', config['detector']['cooldown_period']))
 
-# Frame dimensions
-GRID_HEIGHT = 15
+# Frame dimensions (15x12 sensor grid)
+GRID_HEIGHT = 15  # Updated to match actual sensor grid
 GRID_WIDTH = 12
 
 # Initialize fall detector
@@ -161,20 +224,42 @@ def log_model_weights(model):
 def init_detector_and_buffers():
     """Initialize detector and all related buffers."""
     global detector, frame_buffer, high_prob_frames, last_fall_time, fall_probability, fall_in_progress
-    
+    global softbio_extractor, softbio_model
+
     try:
         logger.info("Bypassing fall detector initialization for PT testing...")
-        
+
         # Initialize buffers
         frame_buffer.clear()
         high_prob_frames.clear()
         last_fall_time = 0
         fall_probability = 0.0
         fall_in_progress = False
-        
+
+        # Initialize soft biometrics components
+        logger.info("Initializing soft biometrics components...")
+        try:
+            # Load softbio configuration
+            with open('softbio/config/softbio.yaml', 'r') as f:
+                softbio_cfg = yaml.safe_load(f)['softbio']
+
+            # Initialize feature extractor and model
+            grid_cfg = softbio_cfg['grid']
+            softbio_extractor = GaitFeatureExtractor(
+                grid_w=int(grid_cfg['width']),
+                grid_h=int(grid_cfg['height']),
+                cell_m=float(grid_cfg['cell_meters']),
+                cfg=softbio_cfg
+            )
+            softbio_model = SoftBioBaseline(cfg=softbio_cfg)
+            logger.info("Soft biometrics components initialized successfully")
+        except Exception as e:
+            logger.warning(f"Could not initialize soft biometrics: {str(e)}")
+            # Don't fail - allow server to run without softbio
+
         logger.info("All buffers initialized - Fall detector bypassed")
         logger.info("This server is configured for PT metrics testing only")
-        
+
         return True
         
     except Exception as e:
@@ -387,9 +472,9 @@ def calculate_balance_metrics(frame_array):
 def calculate_wandering_metrics(frame_array):
     """Calculate wandering metrics from the current frame."""
     try:
-        # Constants for sensor array dimensions
+        # Constants for sensor array dimensions (match configured grid)
         GRID_WIDTH = 12  # sensors
-        GRID_HEIGHT = 15  # sensors
+        GRID_HEIGHT = 48  # sensors
         INCHES_PER_SENSOR = 4  # each sensor is 4x4 inches
         FEET_PER_SENSOR = INCHES_PER_SENSOR / 12  # convert to feet
         MIN_MOVEMENT_THRESHOLD = FEET_PER_SENSOR * 0.5  # Must move at least half a sensor to count
@@ -611,6 +696,67 @@ def has_significant_movement(frame_array, prev_frame=None, threshold=0.05):
     # Temporarily disabled - always return True to allow all frames
     return True
 
+def fuse_basestation_frames():
+    """
+    Fuse 4 basestation frames into unified 80×54 grid.
+    Uses config.yaml offsets for coordinate mapping - adjust config to recalibrate.
+
+    Returns:
+        np.ndarray: Unified grid (UNIFIED_GRID_HEIGHT × UNIFIED_GRID_WIDTH)
+    """
+    unified_grid = np.zeros((UNIFIED_GRID_HEIGHT, UNIFIED_GRID_WIDTH), dtype=np.float32)
+
+    for bs_id, bs_data in basestation_frames.items():
+        frame = bs_data.get('data')
+        if frame is not None:
+            width = bs_data['width']
+            height = bs_data['height']
+            offsetX = bs_data['offsetX']
+            offsetY = bs_data['offsetY']
+
+            # Validate frame shape matches config
+            expected_shape = (height, width)
+            if frame.shape != expected_shape:
+                logger.warning(f"BS #{bs_id} fusion skipped: shape {frame.shape} != expected {expected_shape}")
+                continue
+
+            # Place frame in unified grid using config offsets
+            y_start = offsetY
+            y_end = offsetY + height
+            x_start = offsetX
+            x_end = offsetX + width
+
+            # Bounds check
+            if y_end <= UNIFIED_GRID_HEIGHT and x_end <= UNIFIED_GRID_WIDTH:
+                unified_grid[y_start:y_end, x_start:x_end] = frame
+                logger.debug(f"BS #{bs_id} fused at [{y_start}:{y_end}, {x_start}:{x_end}]")
+            else:
+                logger.error(f"BS #{bs_id} offset out of bounds: [{y_start}:{y_end}, {x_start}:{x_end}] exceeds ({UNIFIED_GRID_HEIGHT}, {UNIFIED_GRID_WIDTH})")
+
+    return unified_grid
+
+def get_basestation_status():
+    """
+    Get connection status and metadata for all basestations.
+
+    Returns:
+        dict: Basestation status metadata matching frontend UnifiedGridFrame interface
+    """
+    status = {}
+    current_time = time.time()
+    timeout_seconds = 5.0  # Mark disconnected if no data for 5 seconds
+
+    for bs_id, bs_data in basestation_frames.items():
+        last_update = bs_data.get('timestamp', 0)
+        time_since_update = current_time - last_update if last_update > 0 else float('inf')
+
+        status[bs_id] = {
+            'lastUpdate': last_update,
+            'connected': bs_data.get('connected', False) and time_since_update < timeout_seconds
+        }
+
+    return status
+
 def process_frame(frame_data, force_fall=False):
     """Process a single frame of sensor data and check for falls."""
     global frame_buffer, high_prob_frames, last_fall_time, fall_probability, fall_in_progress, prev_frame, alert_history
@@ -697,42 +843,47 @@ def process_frame(frame_data, force_fall=False):
             logger.debug("Buffer not yet full. Waiting for more frames.")
             return False, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
 
-        # Process sequence for prediction
-        sequence = np.array([list(frame_buffer)])
-        sequence = sequence.reshape(sequence.shape + (1,))
-        
-        # Get prediction
-        fall_probability = float(detector.model.predict(sequence, verbose=0)[0][0])
-        logger.debug(f"Fall probability: {fall_probability:.4f}")
+        # If ML detector is available, run prediction; otherwise bypass
+        if detector is not None and getattr(detector, "model", None) is not None:
+            # Process sequence for prediction
+            sequence = np.array([list(frame_buffer)])
+            sequence = sequence.reshape(sequence.shape + (1,))
+            
+            # Get prediction
+            fall_probability = float(detector.model.predict(sequence, verbose=0)[0][0])
+            logger.debug(f"Fall probability: {fall_probability:.4f}")
 
-        # Track high probability frames
-        is_high_prob = fall_probability >= FALL_THRESHOLD
-        high_prob_frames.append(is_high_prob)
-        logger.debug(f"High probability frames: {list(high_prob_frames)}")
+            # Track high probability frames
+            is_high_prob = fall_probability >= FALL_THRESHOLD
+            high_prob_frames.append(is_high_prob)
+            logger.debug(f"High probability frames: {list(high_prob_frames)}")
 
-        # Check for fall detection conditions
-        if (len(high_prob_frames) == CONSECUTIVE_FRAMES and 
-            all(high_prob_frames) and 
-            current_time - last_fall_time >= COOLDOWN_PERIOD):
-            
-            last_fall_time = current_time
-            fall_in_progress = True
-            logger.info(f"Fall detected with probability: {fall_probability:.2f}")
-            
-            # Send SMS alert using Mobile Text Alerts
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            message = (
-                f"🚨 FALL DETECTED in Joe's room!\n\n"
-                f"Confidence: {fall_probability * 100:.0f}%\n"
-                f"Time: {timestamp}\n\n"
-                f"Please check on him immediately.\n\n"
-                f"👉 Emergency Services: https://emergency.scanlyticsinc.com/dispatch?location=joes_room"
-            )
-            
-            # Send SMS alert with confidence for alert history
-            sms_success = send_mobile_text_alert(message, fall_probability)
-            
-            return True, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+            # Check for fall detection conditions
+            if (len(high_prob_frames) == CONSECUTIVE_FRAMES and 
+                all(high_prob_frames) and 
+                current_time - last_fall_time >= COOLDOWN_PERIOD):
+                
+                last_fall_time = current_time
+                fall_in_progress = True
+                logger.info(f"Fall detected with probability: {fall_probability:.2f}")
+                
+                # Send SMS alert using Mobile Text Alerts
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                message = (
+                    f"🚨 FALL DETECTED in Joe's room!\n\n"
+                    f"Confidence: {fall_probability * 100:.0f}%\n"
+                    f"Time: {timestamp}\n\n"
+                    f"Please check on him immediately.\n\n"
+                    f"👉 Emergency Services: https://emergency.scanlyticsinc.com/dispatch?location=joes_room"
+                )
+                
+                # Send SMS alert with confidence for alert history
+                sms_success = send_mobile_text_alert(message, fall_probability)
+                
+                return True, fall_probability, decibel_level, balance_metrics, wandering_metrics, gait_metrics
+        else:
+            # ML detector not initialized; bypass prediction
+            fall_probability = 0.0
 
         # If we reach here, no fall is detected
         # Clear fall_in_progress if we're out of cooldown
@@ -760,6 +911,33 @@ def process_frame(frame_data, force_fall=False):
             'symmetryScore': 1.0,
             'stepCount': 0
         }
+
+def _on_softbio_message(client, userdata, msg):
+    """Handle soft biometrics prediction messages from MQTT"""
+    try:
+        payload = msg.payload.decode("utf-8")
+        _softbio_q.put_nowait(payload)  # enqueue raw JSON string
+        logger.debug(f"Enqueued softbio prediction to SSE queue")
+    except queue.Full:
+        logger.warning("Softbio queue full, dropping message")
+    except Exception as e:
+        logger.error(f"Error handling softbio message: {e}")
+
+# Session management functions for EEG+floor data export
+def session_start(session_id: str):
+    global session_writer, active_session_id
+    active_session_id = session_id
+    if EXP_CFG.get("enabled"):
+        session_writer = SessionWriter(session_id, EXP_CFG["dir"], EXP_CFG.get("format","parquet"))
+        logger.info(f"[SESSION] writer initialized for {session_id}")
+
+def session_stop():
+    global session_writer, active_session_id
+    if session_writer:
+        out = session_writer.finalize()
+        logger.info(f"[SESSION] export complete → {out}")
+        session_writer = None
+    active_session_id = None
 
 def on_mqtt_message(client, userdata, message):
     try:
@@ -838,7 +1016,73 @@ def on_mqtt_message(client, userdata, message):
                 # Process frame data and get fall detection results
                 fall_detected, confidence, decibel_level, balance_metrics, wandering_metrics, gait_metrics = process_frame(frame_array)
                 logger.info(f"Processed frame: fall_detected={fall_detected}, confidence={confidence:.2f}, dB={decibel_level:.1f}")
-                
+
+                # Process soft biometrics if initialized
+                if softbio_extractor and softbio_model:
+                    try:
+                        # Convert to boolean array for softbio (15x12 grid)
+                        softbio_frame = frame_array > 0  # Convert to boolean
+
+                        # Log if any sensors are active
+                        active_count = np.sum(softbio_frame)
+                        if active_count > 0:
+                            logger.debug(f"Softbio: {active_count} active sensors")
+
+                        # Process frame through feature extractor
+                        current_time = time.time()
+                        actors = softbio_extractor.ingest_frame(softbio_frame, current_time)
+
+                        # Log number of actors detected
+                        if actors:
+                            logger.info(f"Softbio: Detected {len(actors)} actors")
+
+                        # Generate predictions for each tracked actor
+                        for actor_features in actors:
+                            # Check if we should publish (rate limiting per track)
+                            last_pub_time = softbio_last_pub.get(actor_features.track_id, 0)
+                            if current_time - last_pub_time >= SOFTBIO_PUBLISH_INTERVAL:
+                                # Generate prediction
+                                prediction = softbio_model.predict(actor_features)
+                                logger.info(f"Softbio: Generated prediction for track {actor_features.track_id}")
+
+                                # Create output message
+                                softbio_msg = {
+                                    "ts": datetime.now().isoformat() + 'Z',
+                                    "track_id": actor_features.track_id,
+                                    "pred": prediction.to_dict(),
+                                    "features": {
+                                        "cadence_spm": actor_features.cadence_spm,
+                                        "speed_mps": actor_features.speed_mps,
+                                        "step_cv": actor_features.step_cv,
+                                        "step_len_cv": actor_features.step_len_cv,
+                                    }
+                                }
+
+                                # Add to SSE queue for frontend
+                                if _softbio_q.full():
+                                    _softbio_q.get()  # Remove oldest
+                                _softbio_q.put(softbio_msg)
+
+                                # Update last publish time
+                                softbio_last_pub[actor_features.track_id] = current_time
+
+                                logger.info(f"Softbio prediction for track {actor_features.track_id}: {prediction.gender.value}, {prediction.height_cm:.1f}cm, cadence={actor_features.cadence_spm:.0f}spm, speed={actor_features.speed_mps:.2f}m/s, steps={len(actor_features.steps)}")
+                    except Exception as e:
+                        logger.debug(f"Softbio processing error: {str(e)}")
+                        # Don't fail the main processing
+
+                # Get current time for synchronization
+                t_now = time.time()
+
+                # UI EEG snapshot (downsampled)
+                eeg_ui = None
+                if eeg_reader:
+                    samples = eeg_reader.snapshot_latest(n=EEG_CFG.get("max_hz", 32))
+                    # keep only value by channel for last sample (very light for UI)
+                    if samples:
+                        t_last, vec = samples[-1]
+                        eeg_ui = {"t_epoch": t_last, "vals": vec, "labels": EEG_CFG.get("channel_labels", [])}
+
                 # Always send update to frontend for both normal walking and falls
                 update = {
                     'grid': frame_array.tolist(),
@@ -848,9 +1092,30 @@ def on_mqtt_message(client, userdata, message):
                     'balanceMetrics': balance_metrics,
                     'wanderingMetrics': wandering_metrics,
                     'gaitMetrics': gait_metrics,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now().isoformat(),
+                    't_epoch': t_now,
+                    'eeg': eeg_ui  # Add EEG data field
                 }
                 grid_updates.put(update)
+
+                # Write to session file if active
+                if session_writer and active_session_id:
+                    # Get xy coordinates if available (placeholder for now)
+                    xy = None  # TODO: Extract actual x,y from path tracking if available
+
+                    # floor row
+                    session_writer.add_floor_frame(t_now, xy, {
+                        'grid': frame_array.tolist(),
+                        'fall_detected': fall_detected,
+                        'confidence': float(confidence) * 100,
+                        'timestamp': datetime.now().isoformat()
+                    })
+
+                    # drain EEG since last write
+                    if eeg_reader:
+                        drained = eeg_reader.drain_since(t_now - 1.0)  # 1 second window
+                        if drained:
+                            session_writer.add_eeg_chunk(drained, EEG_CFG.get("channel_labels", []))
                 
                 if fall_detected:
                     logger.info("🚨 Fall detected! Sending alert to frontend")
@@ -878,6 +1143,115 @@ def on_mqtt_message(client, userdata, message):
                 logger.info(f"Processed path data: length={len(data)}")
             else:
                 logger.error(f"Invalid path data format: {type(data)}")
+
+        elif message.topic.startswith("basestation/"):
+            # Handle multi-basestation frame data
+            # Extract basestation ID from topic (e.g., "basestation/630/frame" -> "630")
+            topic_parts = message.topic.split('/')
+            if len(topic_parts) >= 3 and topic_parts[2] == 'frame':
+                basestation_id = topic_parts[1]
+
+                if basestation_id not in basestation_frames:
+                    logger.warning(f"Unknown basestation ID: {basestation_id}")
+                    return
+
+                # Extract frame data using same logic as single-device handler
+                frame_data = None
+                if isinstance(data, dict):
+                    if 'payload' in data and 'data' in data['payload']:
+                        frame_data = data['payload']['data']
+                        logger.debug(f"BS #{basestation_id}: Using payload.data format")
+                    elif 'frame' in data:
+                        frame_data = data['frame']
+                        logger.debug(f"BS #{basestation_id}: Using direct frame format")
+                    else:
+                        logger.error(f"BS #{basestation_id}: No valid frame data found. Keys: {list(data.keys())}")
+                        return
+                elif isinstance(data, list):
+                    frame_data = data
+                    logger.debug(f"BS #{basestation_id}: Using direct list format")
+
+                if not isinstance(frame_data, list) or not frame_data:
+                    logger.error(f"BS #{basestation_id}: Invalid frame data format: {type(frame_data)}")
+                    return
+
+                # Convert to numpy array
+                try:
+                    frame_array = np.array(frame_data, dtype=np.float32)
+                    expected_shape = (basestation_frames[basestation_id]['height'],
+                                     basestation_frames[basestation_id]['width'])
+
+                    # Validate dimensions
+                    if frame_array.shape != expected_shape:
+                        if frame_array.shape == (expected_shape[1], expected_shape[0]):
+                            frame_array = frame_array.T
+                            logger.debug(f"BS #{basestation_id}: Transposed frame to match expected dimensions")
+                        else:
+                            logger.error(f"BS #{basestation_id}: Frame size mismatch: got {frame_array.shape}, expected {expected_shape}")
+                            return
+
+                    # Store frame in buffer
+                    basestation_frames[basestation_id]['data'] = frame_array
+                    basestation_frames[basestation_id]['timestamp'] = time.time()
+                    basestation_frames[basestation_id]['connected'] = True
+
+                    logger.info(f"BS #{basestation_id}: Received frame {frame_array.shape}, active sensors: {np.sum(frame_array > 0)}")
+
+                    # Fuse all basestation frames into unified grid
+                    unified_grid = fuse_basestation_frames()
+                    active_sensors = np.sum(unified_grid > 0)
+                    logger.debug(f"Unified grid fused: {unified_grid.shape}, active sensors: {active_sensors}")
+
+                    t_now = time.time()
+
+                    # Get EEG data if available
+                    eeg_ui = None
+                    if eeg_reader:
+                        with eeg_lock:
+                            latest = eeg_reader.get_latest()
+                            if latest is not None:
+                                eeg_ui = {
+                                    't_epoch': latest['t_epoch'],
+                                    'vals': latest['vals'].tolist() if hasattr(latest['vals'], 'tolist') else latest['vals'],
+                                    'labels': EEG_CFG.get("channel_labels", [])
+                                }
+
+                    # Push unified grid to SSE stream
+                    update = {
+                        'grid': unified_grid.tolist(),
+                        'basestations': get_basestation_status(),
+                        'timestamp': datetime.now().isoformat(),
+                        't_epoch': t_now,
+                        'eeg': eeg_ui
+                    }
+                    grid_updates.put(update)
+                    logger.debug(f"Unified grid update sent to SSE stream")
+
+                    # Write to session file if active (save unified grid for research)
+                    if session_writer and active_session_id:
+                        # Get xy coordinates if available (placeholder for now)
+                        xy = None  # TODO: Extract actual x,y from path tracking if available
+
+                        # Save unified grid floor data
+                        session_writer.add_floor_frame(t_now, xy, {
+                            'grid': unified_grid.tolist(),
+                            'basestations': get_basestation_status(),
+                            'timestamp': datetime.now().isoformat()
+                        })
+
+                        # Drain EEG since last write
+                        if eeg_reader:
+                            drained = eeg_reader.drain_since(t_now - 1.0)  # 1 second window
+                            if drained:
+                                session_writer.add_eeg_chunk(drained, EEG_CFG.get("channel_labels", []))
+
+                        logger.debug(f"Session data written: unified grid {unified_grid.shape}")
+
+                except Exception as e:
+                    logger.error(f"BS #{basestation_id}: Error processing frame: {str(e)}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    return
 
     except Exception as e:
         logger.error(f"Error in MQTT message handler: {str(e)}")
@@ -913,7 +1287,14 @@ def on_mqtt_connect(client, userdata, flags, rc):
             ("pt/metrics", 0, "PT metrics data"),
             ("pt/exercise/status", 0, "PT exercise status"),
             ("pt/exercise/type", 0, "PT exercise type"),
-            ("pt/exercise/command", 0, "PT exercise commands")
+            ("pt/exercise/command", 0, "PT exercise commands"),
+            ("softbio/prediction", 0, "Soft biometrics predictions"),
+            ("softbio/debug/features", 0, "Soft biometrics debug features"),
+            # Multi-basestation frame data
+            ("basestation/630/frame", 0, "Basestation #630 frame data (40×24)"),
+            ("basestation/631/frame", 0, "Basestation #631 frame data (40×24)"),
+            ("basestation/632/frame", 0, "Basestation #632 frame data (40×30)"),
+            ("basestation/633/frame", 0, "Basestation #633 frame data (40×30)")
         ]
         
         # Subscribe to topics with enhanced logging
@@ -942,7 +1323,11 @@ def on_mqtt_connect(client, userdata, flags, rc):
                     logger.warning(f"Failed subscription: {topic}")
         else:
             logger.info("✅ All MQTT topic subscriptions completed successfully")
-        
+
+        # Register callback for softbio predictions
+        client.message_callback_add(SOFTBIO_TOPIC, _on_softbio_message)
+        logger.info(f"📎 Registered callback for {SOFTBIO_TOPIC}")
+
         try:
             # Log client details for debugging
             client_id = getattr(client, '_client_id', b'unknown').decode()
@@ -1057,6 +1442,34 @@ def mqtt_status():
             'error': 'Internal server error',
             'message': str(e)
         }), 500
+
+@app.route('/api/eeg/status')
+def eeg_status():
+    """Get EEG LSL connection status"""
+    ok = bool(eeg_reader and eeg_reader.running)
+    return jsonify({
+        "ok": ok,
+        "stream": EEG_CFG.get("stream_name", "EEG")
+    })
+
+@app.route('/api/session/start', methods=['POST'])
+def api_session_start():
+    """Start a new session for EEG+floor data recording"""
+    data = request.get_json()
+    session_id = data.get('session_id', str(uuid.uuid4()))
+    session_start(session_id)
+    return jsonify({
+        "session_id": session_id,
+        "status": "started"
+    })
+
+@app.route('/api/session/stop', methods=['POST'])
+def api_session_stop():
+    """Stop the current session and finalize the export"""
+    session_stop()
+    return jsonify({
+        "status": "stopped"
+    })
 
 @app.route('/api/grid-stream')
 def grid_stream():
@@ -1504,7 +1917,33 @@ def metrics_stream():
             try:
                 metrics_data = json.loads(message.payload.decode('utf-8'))
                 logger.info(f"Received PT metrics from MQTT: {metrics_data}")
-                metrics_queue.put(metrics_data)
+                
+                # Map PT analytics fields to frontend expected fields
+                mapped_metrics = {}
+                
+                # Map sway_area_cm2 to copArea for frontend compatibility
+                if 'sway_area_cm2' in metrics_data:
+                    mapped_metrics['copArea'] = metrics_data['sway_area_cm2']
+                
+                # Map sway_vel_cm_s to swayVelocity
+                if 'sway_vel_cm_s' in metrics_data:
+                    mapped_metrics['swayVelocity'] = metrics_data['sway_vel_cm_s']
+                
+                # Map load distribution percentages
+                if 'left_pct' in metrics_data:
+                    mapped_metrics['leftLoadPct'] = metrics_data['left_pct'] * 100  # Convert to percentage
+                if 'right_pct' in metrics_data:
+                    mapped_metrics['rightLoadPct'] = metrics_data['right_pct'] * 100  # Convert to percentage
+                
+                # Keep original timestamp and add any additional fields
+                if 'ts' in metrics_data:
+                    mapped_metrics['timestamp'] = metrics_data['ts']
+                
+                # Merge original metrics with mapped ones (mapped ones take precedence)
+                final_metrics = {**metrics_data, **mapped_metrics}
+                
+                logger.info(f"Mapped PT metrics for frontend: {final_metrics}")
+                metrics_queue.put(final_metrics)
             except Exception as e:
                 logger.error(f"Error processing PT metrics from MQTT: {e}")
         
@@ -1558,6 +1997,45 @@ def metrics_stream():
             'error': 'Internal server error',
             'message': str(e)
         }), 500
+
+@app.route('/api/softbio-stream')
+def softbio_stream():
+    """SSE endpoint for soft biometrics predictions from MQTT"""
+    def generate():
+        # Optional: initial comment for proxies
+        yield ": softbio stream open\n\n"
+
+        while True:
+            try:
+                # Block waiting for data from the global queue
+                data = _softbio_q.get()
+
+                # Name the SSE event for frontend filtering
+                # Using 'softbio:prediction' as specified in AGENT_TASKS
+                yield f"event: softbio:prediction\ndata: {json.dumps(data)}\n\n"
+
+                logger.debug(f"Sent softbio prediction via SSE")
+
+            except Exception as e:
+                logger.error(f"Error in softbio SSE stream: {e}")
+                # Send error event
+                yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    logger.info("Soft biometrics SSE stream requested")
+
+    # Return SSE response with proper headers
+    response = Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    )
+    return response
 
 # PT Session management API endpoints
 @app.route('/api/pt-sessions', methods=['POST'])
@@ -1636,24 +2114,40 @@ if __name__ == '__main__':
         logger.info("="*50)
         logger.info("Starting Fall Detection System")
         logger.info("="*50)
-        
+
         logger.info("Step 1: Loading configuration...")
         with open('config.yaml', 'r') as file:
             config = yaml.safe_load(file)
         logger.info("Configuration loaded successfully")
-        
+
         logger.info("\nStep 2: Initializing fall detector...")
         if not init_detector_and_buffers():
             logger.error("Failed to initialize fall detector. Exiting...")
             exit(1)
         logger.info("Fall detector initialized successfully")
-        
+
         logger.info("\nStep 3: Setting up MQTT client...")
         if not setup_mqtt():
             logger.error("Failed to setup MQTT client. Exiting...")
             exit(1)
         logger.info("MQTT client setup successfully")
-        
+
+        # Step 3.5: Initialize EEG routes
+        logger.info("\nStep 3.5: Initializing EEG routes...")
+        init_eeg_routes(app)
+
+        # Start Cortex in background
+        load_dotenv('../.env.emotiv')
+        client_id = os.getenv('EMOTIV_CLIENT_ID')
+        client_secret = os.getenv('EMOTIV_CLIENT_SECRET')
+        license_id = os.getenv('EMOTIV_LICENSE_ID')
+
+        if client_id and client_secret:
+            logger.info("🧠 Starting Emotiv Cortex in background...")
+            start_cortex_in_thread(client_id, client_secret, license_id)
+        else:
+            logger.warning("⚠️  Emotiv credentials not found - EEG disabled")
+
         logger.info("\nStep 4: Starting Flask server...")
         app.run(host='0.0.0.0', port=5001, threaded=True, debug=True)
     except Exception as e:

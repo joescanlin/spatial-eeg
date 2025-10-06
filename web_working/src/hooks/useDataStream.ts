@@ -167,7 +167,8 @@ export function useDataStream(activeView?: string) {
               wanderingMetrics: {
                 ...prev.wanderingMetrics,
                 ...(data.wanderingMetrics || {})
-              }
+              },
+              eeg: data.eeg || null  // Add EEG data
              };
              console.log("🚨 Updated Grid State:", {
                fallDetected: newState.fallDetected,
@@ -175,7 +176,8 @@ export function useDataStream(activeView?: string) {
                decibelLevel: newState.decibelLevel,
                gaitMetrics: newState.gaitMetrics,
                balanceMetrics: newState.balanceMetrics,
-               wanderingMetrics: newState.wanderingMetrics
+               wanderingMetrics: newState.wanderingMetrics,
+               eeg: newState.eeg ? `${newState.eeg.vals.length} channels` : 'none'
              });
              return newState;
            });

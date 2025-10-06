@@ -24,5 +24,57 @@ visualization:
   show_grid: true
   show_timestamp: true
   grid_width: 12
-  grid_height: 15
+  grid_height: 48
   pixel_resolution_inches: 4
+
+# Multi-basestation unified grid configuration
+# Adjust offsetX/offsetY here to recalibrate coordinate system without code changes
+basestations:
+  unified_grid:
+    width: 80
+    height: 54
+
+  devices:
+    "630":
+      width: 40
+      height: 24
+      offsetX: 0
+      offsetY: 0
+      mqtt_topic: basestation/630/frame
+      description: "Top-left quadrant"
+
+    "631":
+      width: 40
+      height: 24
+      offsetX: 40
+      offsetY: 0
+      mqtt_topic: basestation/631/frame
+      description: "Top-right quadrant"
+
+    "632":
+      width: 40
+      height: 30
+      offsetX: 0
+      offsetY: 24
+      mqtt_topic: basestation/632/frame
+      description: "Bottom-left quadrant"
+
+    "633":
+      width: 40
+      height: 30
+      offsetX: 40
+      offsetY: 24
+      mqtt_topic: basestation/633/frame
+      description: "Bottom-right quadrant"
+
+eeg:
+  enabled: true
+  stream_name: EEG            # EmotivPRO default outlet name
+  max_hz: 32                  # downsample target for UI
+  status_log_sec: 10
+  channel_labels: ["AF3","T7","Pz","T8","AF4"]   # Insight default; adjust if needed
+
+session_export:
+  enabled: true
+  dir: "./session_exports"
+  format: "parquet"           # fallback "csv"

@@ -216,16 +216,16 @@ def subscribe_pt_raw(client):
 
 def publish_pt_metrics(client, payload: dict):
     """
-    Publish PT metrics data to the derived topic.
+    Publish PT metrics data to the PT metrics topic.
     
     Args:
         client (mqtt.Client): The MQTT client instance.
         payload (dict): The payload to publish.
     """
-    # Use a sensible default if the key doesn't exist
-    topic = config["mqtt"].get("frame_data_topic", "controller/networkx/frame/rft")
+    # Use the correct PT metrics topic
+    topic = config["mqtt"].get("metrics_topic", "pt/metrics")
     client.publish(topic, json.dumps(payload), qos=1, retain=False)
-    logger.debug(f"Published to {topic}: {payload}")
+    logger.debug(f"Published PT metrics to {topic}: {payload}")
 
 def subscribe_pt_metrics(client):
     """

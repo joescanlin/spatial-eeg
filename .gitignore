@@ -60,3 +60,11 @@ node_modules/
 
 # Test files and databases
 test.db
+
+# Session data and exports (research data - too large for git)
+session_data/
+session_exports/
+
+# Launcher runtime files
+launcher.log
+start.sh

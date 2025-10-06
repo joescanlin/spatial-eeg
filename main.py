@@ -14,11 +14,17 @@ from src.backend.db import models
 from src.backend.routes import (
     auth_router,
     clinics_router,
-    patients_router, 
+    patients_router,
     sessions_router,
     metrics_router
 )
+from src.backend.routes.eeg_session import router as eeg_router, initialize_cortex, shutdown_cortex
 from src.backend.services.metric_ingest import DBMetricPersister
+import os
+from dotenv import load_dotenv
+
+# Load Emotiv credentials
+load_dotenv('.env.emotiv')
 
 # Configure logging
 logging.basicConfig(
@@ -49,6 +55,7 @@ app.include_router(clinics_router, prefix="/api")
 app.include_router(patients_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(metrics_router, prefix="/api")
+app.include_router(eeg_router)  # EEG routes already have /api/eeg prefix
 
 # Dependency to get DB session
 async def get_db():
@@ -163,24 +170,39 @@ async def test_metrics(data: dict):
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting up the API server")
-    
+
+    # Initialize Emotiv Cortex
+    client_id = os.getenv('EMOTIV_CLIENT_ID')
+    client_secret = os.getenv('EMOTIV_CLIENT_SECRET')
+    license_id = os.getenv('EMOTIV_LICENSE_ID')
+
+    if client_id and client_secret:
+        logger.info("🧠 Initializing Emotiv Cortex...")
+        success = await initialize_cortex(client_id, client_secret, license_id)
+        if success:
+            logger.info("✅ Cortex initialized successfully!")
+        else:
+            logger.warning("⚠️  Cortex initialization failed - check logs. EEG features will be disabled.")
+    else:
+        logger.warning("⚠️  Emotiv credentials not found in .env.emotiv - EEG features disabled")
+
     # Start the metric ingestion service
     global metric_persister
     try:
         # Create DB session
         db = AsyncSessionLocal()
-        
+
         # Create metric persister with custom message handler
         metric_persister = DBMetricPersister(db)
-        
+
         # Register the custom message handler
         metric_persister.register_message_handler(handle_metric_message)
-        
+
         # Start metric persister with the physical sensor grid MQTT broker
         broker_host = "169.254.100.100"  # Physical sensor grid IP address
         broker_port = 1883
         await metric_persister.start(broker_host, broker_port)
-        
+
         logger.info(f"Metric ingestion service started, connected to {broker_host}:{broker_port}")
     except Exception as e:
         logger.error(f"Failed to start metric ingestion service: {str(e)}", exc_info=True)
@@ -189,7 +211,11 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down the API server")
-    
+
+    # Shutdown Cortex
+    logger.info("🧠 Shutting down Cortex...")
+    await shutdown_cortex()
+
     # Stop the metric ingestion service
     global metric_persister
     if metric_persister:

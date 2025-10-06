@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial EEG System - Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #f1f5f9;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: #f1f5f9;
+        }
+
+        .header p {
+            color: #94a3b8;
+            font-size: 0.95rem;
+        }
+
+        .panel {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #e2e8f0;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 0.75rem;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .status-item {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .status-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .status-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-online {
+            color: #10b981;
+        }
+
+        .status-offline {
+            color: #ef4444;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot-online {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .dot-offline {
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+        }
+
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: #2563eb;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1d4ed8;
+        }
+
+        .btn-danger {
+            background: #dc2626;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
+        .btn-secondary {
+            background: #475569;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #334155;
+        }
+
+        .btn-success {
+            background: #059669;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #047857;
+        }
+
+        .quick-links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .quick-link {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 1rem;
+            text-decoration: none;
+            color: #60a5fa;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: block;
+            text-align: center;
+        }
+
+        .quick-link:hover {
+            background: #1e293b;
+            border-color: #60a5fa;
+            transform: translateY(-2px);
+        }
+
+        .logs-container {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: #94a3b8;
+            display: none;
+        }
+
+        .logs-container.visible {
+            display: block;
+        }
+
+        .update-info {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .update-info.visible {
+            display: block;
+        }
+
+        .update-available {
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.1);
+        }
+
+        .spinner {
+            border: 2px solid #334155;
+            border-top: 2px solid #60a5fa;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>Spatial EEG System Control Panel</h1>
+            <p>Multi-Basestation Sensor Fusion & EEG Research Platform</p>
+        </div>
+
+        <!-- System Status -->
+        <div class="panel">
+            <h2>System Status</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-label">Launcher</div>
+                    <div class="status-value status-online">
+                        <span class="status-dot dot-online"></span>
+                        Online
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Backend (Port 5001)</div>
+                    <div class="status-value" id="backend-status">
+                        <span class="status-dot dot-offline"></span>
+                        Checking...
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Frontend (Port 5000)</div>
+                    <div class="status-value" id="frontend-status">
+                        <span class="status-dot dot-offline"></span>
+                        Checking...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Controls -->
+        <div class="panel">
+            <h2>System Controls</h2>
+            <div class="button-group">
+                <button class="btn btn-success" id="btn-start">
+                    <span>▶</span> Start System
+                </button>
+                <button class="btn btn-danger" id="btn-stop">
+                    <span>■</span> Stop System
+                </button>
+                <button class="btn btn-secondary" id="btn-restart">
+                    <span>↻</span> Restart System
+                </button>
+            </div>
+        </div>
+
+        <!-- Updates -->
+        <div class="panel">
+            <h2>Software Updates</h2>
+            <div class="button-group">
+                <button class="btn btn-primary" id="btn-check-updates">
+                    <span>🔍</span> Check for Updates
+                </button>
+                <button class="btn btn-success hidden" id="btn-install-updates">
+                    <span>⬇</span> Install Updates
+                </button>
+            </div>
+            <div class="update-info" id="update-info"></div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="panel">
+            <h2>Quick Access</h2>
+            <div class="quick-links">
+                <a href="http://localhost:5000" target="_blank" class="quick-link">
+                    🏠 Main Application
+                </a>
+                <a href="http://localhost:5000/live-gait" target="_blank" class="quick-link">
+                    🚶 Live Gait View
+                </a>
+                <a href="http://localhost:5000/unified-grid" target="_blank" class="quick-link">
+                    📊 Unified Grid
+                </a>
+                <a href="http://localhost:5000/eeg" target="_blank" class="quick-link">
+                    🧠 EEG Monitor
+                </a>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="panel">
+            <h2>System Logs</h2>
+            <div class="button-group">
+                <button class="btn btn-secondary" id="btn-toggle-logs">
+                    <span>📋</span> View Logs
+                </button>
+                <button class="btn btn-secondary" id="btn-refresh-logs">
+                    <span>↻</span> Refresh Logs
+                </button>
+            </div>
+            <div class="logs-container" id="logs-container"></div>
+        </div>
+    </div>
+
+    <script>
+        // API endpoints
+        const API = {
+            status: '/api/status',
+            start: '/api/system/start',
+            stop: '/api/system/stop',
+            restart: '/api/system/restart',
+            checkUpdates: '/api/system/update/check',
+            installUpdates: '/api/system/update/install',
+            logs: '/api/logs'
+        };
+
+        // Update system status
+        async function updateStatus() {
+            try {
+                const response = await fetch(API.status);
+                const data = await response.json();
+
+                // Update backend status
+                const backendStatus = document.getElementById('backend-status');
+                if (data.backend) {
+                    backendStatus.innerHTML = '<span class="status-dot dot-online"></span> Online';
+                    backendStatus.className = 'status-value status-online';
+                } else {
+                    backendStatus.innerHTML = '<span class="status-dot dot-offline"></span> Offline';
+                    backendStatus.className = 'status-value status-offline';
+                }
+
+                // Update frontend status
+                const frontendStatus = document.getElementById('frontend-status');
+                if (data.frontend) {
+                    frontendStatus.innerHTML = '<span class="status-dot dot-online"></span> Online';
+                    frontendStatus.className = 'status-value status-online';
+                } else {
+                    frontendStatus.innerHTML = '<span class="status-dot dot-offline"></span> Offline';
+                    frontendStatus.className = 'status-value status-offline';
+                }
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+
+        // System control functions
+        async function startSystem() {
+            const btn = document.getElementById('btn-start');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Starting...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API.start, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('System started successfully!');
+                } else {
+                    alert('Failed to start system. Check logs for details.');
+                }
+            } catch (error) {
+                alert('Error starting system: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                updateStatus();
+            }
+        }
+
+        async function stopSystem() {
+            const btn = document.getElementById('btn-stop');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Stopping...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API.stop, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('System stopped successfully!');
+                } else {
+                    alert('Failed to stop system. Check logs for details.');
+                }
+            } catch (error) {
+                alert('Error stopping system: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                updateStatus();
+            }
+        }
+
+        async function restartSystem() {
+            if (!confirm('Are you sure you want to restart the system?')) {
+                return;
+            }
+
+            const btn = document.getElementById('btn-restart');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Restarting...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API.restart, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('System restarted successfully!');
+                } else {
+                    alert('Failed to restart system. Check logs for details.');
+                }
+            } catch (error) {
+                alert('Error restarting system: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                updateStatus();
+            }
+        }
+
+        async function checkForUpdates() {
+            const btn = document.getElementById('btn-check-updates');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Checking...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API.checkUpdates);
+                const data = await response.json();
+
+                const updateInfo = document.getElementById('update-info');
+                const installBtn = document.getElementById('btn-install-updates');
+
+                if (data.available) {
+                    updateInfo.className = 'update-info visible update-available';
+                    updateInfo.innerHTML = `
+                        <strong>Updates Available!</strong><br>
+                        ${data.commits} new commit(s)<br>
+                        <pre style="margin-top: 0.5rem; font-size: 0.75rem;">${data.changes}</pre>
+                    `;
+                    installBtn.classList.remove('hidden');
+                } else if (data.error) {
+                    updateInfo.className = 'update-info visible';
+                    updateInfo.innerHTML = `<strong>Error:</strong> ${data.error}`;
+                    installBtn.classList.add('hidden');
+                } else {
+                    updateInfo.className = 'update-info visible';
+                    updateInfo.innerHTML = `<strong>✓ System is up to date</strong><br>${data.message}`;
+                    installBtn.classList.add('hidden');
+                }
+            } catch (error) {
+                alert('Error checking for updates: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function installUpdates() {
+            if (!confirm('This will update the system and restart. Continue?')) {
+                return;
+            }
+
+            const btn = document.getElementById('btn-install-updates');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Installing...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API.installUpdates, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Updates installed! System is restarting...');
+                    setTimeout(updateStatus, 5000);
+                } else {
+                    alert('Failed to install updates: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error installing updates: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadLogs() {
+            try {
+                const response = await fetch(API.logs);
+                const data = await response.json();
+
+                const logsContainer = document.getElementById('logs-container');
+                if (data.logs) {
+                    logsContainer.textContent = data.logs;
+                    logsContainer.scrollTop = logsContainer.scrollHeight;
+                } else if (data.error) {
+                    logsContainer.textContent = 'Error loading logs: ' + data.error;
+                }
+            } catch (error) {
+                console.error('Error loading logs:', error);
+            }
+        }
+
+        function toggleLogs() {
+            const logsContainer = document.getElementById('logs-container');
+            const btn = document.getElementById('btn-toggle-logs');
+
+            if (logsContainer.classList.contains('visible')) {
+                logsContainer.classList.remove('visible');
+                btn.innerHTML = '<span>📋</span> View Logs';
+            } else {
+                logsContainer.classList.add('visible');
+                btn.innerHTML = '<span>📋</span> Hide Logs';
+                loadLogs();
+            }
+        }
+
+        // Event listeners
+        document.getElementById('btn-start').addEventListener('click', startSystem);
+        document.getElementById('btn-stop').addEventListener('click', stopSystem);
+        document.getElementById('btn-restart').addEventListener('click', restartSystem);
+        document.getElementById('btn-check-updates').addEventListener('click', checkForUpdates);
+        document.getElementById('btn-install-updates').addEventListener('click', installUpdates);
+        document.getElementById('btn-toggle-logs').addEventListener('click', toggleLogs);
+        document.getElementById('btn-refresh-logs').addEventListener('click', loadLogs);
+
+        // Initial status update
+        updateStatus();
+
+        // Auto-refresh status every 5 seconds
+        setInterval(updateStatus, 5000);
+    </script>
+</body>
+</html>

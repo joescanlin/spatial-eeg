@@ -1,3 +1,71 @@
+// EEG Raw Data (128 Hz stream)
+export interface EEGData {
+  t_epoch: number;
+  vals: number[];        // Raw EEG values for each channel
+  labels: string[];      // Channel labels: AF3, AF4, T7, T8, Pz
+}
+
+// Performance Metrics (8 Hz stream)
+export interface PerformanceMetrics {
+  timestamp: number;
+  engagement: number;    // 0-1: Focus/engagement level
+  excitement: number;    // 0-1: Excitement level
+  lexical: number;       // 0-1: Language processing
+  stress: number;        // 0-1: Stress/frustration level
+  relaxation: number;    // 0-1: Relaxation level
+  interest: number;      // 0-1: Interest level
+  focus: number;         // 0-1: Focus/attention level
+}
+
+// Band Power (8 Hz stream)
+export interface BandPower {
+  timestamp: number;
+  channels: {
+    [channel: string]: {  // AF3, AF4, T7, T8, Pz
+      theta: number;      // 4-8 Hz: Memory encoding, drowsiness
+      alpha: number;      // 8-12 Hz: Relaxed alertness
+      betaL: number;      // 12-16 Hz: Active thinking (low)
+      betaH: number;      // 16-25 Hz: Active thinking (high), anxiety
+      gamma: number;      // 25-45 Hz: High-level processing
+    };
+  };
+}
+
+// Motion Data (64 Hz stream)
+export interface MotionData {
+  timestamp: number;
+  gyro: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  accel: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  mag: {
+    x: number;
+    y: number;
+    z: number;
+  };
+}
+
+// Contact Quality (2 Hz stream)
+export interface ContactQuality {
+  timestamp: number;
+  quality: {
+    [channel: string]: number;  // 0-4 scale (0=no signal, 4=excellent)
+  };
+}
+
+// Device Info (2 Hz stream)
+export interface DeviceInfo {
+  timestamp: number;
+  battery: number;           // Battery percentage
+  signalStrength: number;    // Wireless signal strength
+}
+
 export interface GridData {
   frame: number[][];
   timestamp: string;
@@ -9,6 +77,14 @@ export interface GridData {
   fallDetected: boolean;
   alertConfig: AlertConfig;
   alerts: Alert[];
+
+  // EEG Data Streams (all optional until Cortex is connected)
+  eeg?: EEGData | null;                          // Raw EEG (128 Hz)
+  metrics?: PerformanceMetrics | null;           // Cognitive metrics (8 Hz)
+  bandPower?: BandPower | null;                  // Band power (8 Hz)
+  motion?: MotionData | null;                    // Head motion (64 Hz)
+  contactQuality?: ContactQuality | null;        // Sensor quality (2 Hz)
+  deviceInfo?: DeviceInfo | null;                // Battery, signal (2 Hz)
 }
 
 export interface GridStats {
