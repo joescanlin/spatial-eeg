@@ -10,8 +10,10 @@ services:
       - ./web_working/logs:/app/web_working/logs
       # Persist session data
       - ./session_data:/app/session_data
+      # Mount credentials (create these files on Ubuntu - see CREDENTIALS_SETUP.md)
+      - ./.env.emotiv:/app/.env.emotiv:ro
+      - ./web_working/.env:/app/web_working/.env:ro
     environment:
-      # Optional: Add environment variables here
       - PYTHONUNBUFFERED=1
     network_mode: host  # Use host network - ports 3000, 5000, 5001 automatically exposed
     restart: unless-stopped
