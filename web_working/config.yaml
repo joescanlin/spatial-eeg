@@ -41,7 +41,7 @@ basestations:
       height: 24
       offsetX: 0
       offsetY: 0
-      broker: "scanalytics-630.local"
+      broker: "172.19.67.230"  # scanalytics-630.local
       port: 1883
       mqtt_topic: "controller/networkx/frame/rft"  # Local topic on this basestation
       description: "Top-left quadrant"
@@ -51,7 +51,7 @@ basestations:
       height: 24
       offsetX: 40
       offsetY: 0
-      broker: "scanalytics-631.local"
+      broker: "172.19.67.231"  # scanalytics-631.local
       port: 1883
       mqtt_topic: "controller/networkx/frame/rft"  # Local topic on this basestation
       description: "Top-right quadrant"
@@ -61,7 +61,7 @@ basestations:
       height: 30
       offsetX: 0
       offsetY: 24
-      broker: "scanalytics-632.local"
+      broker: "172.19.67.232"  # scanalytics-632.local
       port: 1883
       mqtt_topic: "controller/networkx/frame/rft"  # Local topic on this basestation
       description: "Bottom-left quadrant"
@@ -71,7 +71,7 @@ basestations:
       height: 30
       offsetX: 40
       offsetY: 24
-      broker: "scanalytics-633.local"
+      broker: "172.19.67.233"  # scanalytics-633.local
       port: 1883
       mqtt_topic: "controller/networkx/frame/rft"  # Local topic on this basestation
       description: "Bottom-right quadrant"
