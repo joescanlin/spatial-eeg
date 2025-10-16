@@ -2257,6 +2257,11 @@ if __name__ == '__main__':
 
         # Step 3.5: Setup independent basestation MQTT connections
         logger.info("\nStep 3.5: Setting up basestation MQTT connections...")
+        logger.info(f"BASESTATION_DEVICES loaded: {list(BASESTATION_DEVICES.keys())}")
+        logger.info(f"Number of basestations configured: {len(BASESTATION_DEVICES)}")
+        for bs_id, bs_cfg in BASESTATION_DEVICES.items():
+            logger.info(f"  - Basestation {bs_id}: broker={bs_cfg.get('broker')}, port={bs_cfg.get('port')}")
+
         if not setup_basestation_mqtt():
             logger.warning("No basestation MQTT clients initialized - check config.yaml")
         else:
